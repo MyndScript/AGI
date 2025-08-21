@@ -1,6 +1,4 @@
-// memory_server.go
-// memory_server.go
-// Go gRPC server for AGI memory system
+// [Memory]: This module manages decentralized user memory for AGI.
 package main
 
 import (
@@ -9,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	pb "./memory"
+	pb "github.com/MyndScript/AGI/memory/pb"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"

@@ -1,0 +1,17 @@
+[
+  {
+    "entity": "Brian",
+    "traits": ["codes by vibe", "prefers sidebar interfaces", "uses repair as ritual"],
+    "projects": ["Coherra", "THALLEN"],
+    "preferences": ["avoid CLI-only", "honor emotional context"]
+  },
+  {
+    "entity": "Trapspace",
+    "glyphs": ["#trust-ritual", "#repair-story"],
+    "description": "Validation logic for Coherra, focused on emotional consent."
+  },
+  {
+    "entity": "Session",
+    "summary": "Built memory hooks and glyphs for AGI. Themes: autonomy, emotional context, ritual."
+  }
+]

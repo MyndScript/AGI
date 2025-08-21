@@ -1,0 +1,14 @@
+[
+  {
+    "entity": "Brian",
+    "traits": ["codes by vibe", "prefers sidebar interfaces", "uses repair as ritual"],
+    "projects": ["Coherra", "THALLEN"],
+    "preferences": ["avoid CLI-only", "honor emotional context"]
+  },
+  {
+    "entity": "AGI Memory Server",
+    "traits": ["decentralized", "user-owned", "context-aware"],
+    "projects": ["AGI"],
+    "preferences": ["privacy", "scalable", "modular"]
+  }
+]

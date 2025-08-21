@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memory;
 
-option go_package = "local/memorypb";
+option go_package = "github.com/MyndScript/AGI/memory/pb";
 
 service UserMemoryService {
   rpc Set (SetRequest) returns (SetResponse);
