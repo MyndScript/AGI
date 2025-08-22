@@ -5,7 +5,6 @@ Personality system for AGI
 - Matches and adapts to each user's personality
 - Stores traits, emotional state, and interaction history
 """
-import random  # codacy: disable=unused-import
 import json
 import os
 
@@ -97,7 +96,7 @@ class Personality:
             return "I appreciate your empathy. How can I support you today?"
         # Default fallback
         return "I'm here to listen and help however I can."
-        self._load()
+    # self._load()  # Unreachable code removed
 
 
     def _get_file(self):
@@ -156,6 +155,7 @@ class Personality:
         if len(self.interaction_history) > 1000:
             self.interaction_history = self.interaction_history[-1000:]
         self._save()
+        # TODO: Integrate with MCP memory graph - add interaction as observation node
 
 
     def evolve(self, user_input):
@@ -181,6 +181,8 @@ class Personality:
         elif "plan" in user_input:
             self.archetype = "strategist"
 
+        # TODO: Integrate with MCP memory graph - update archetype node/relations
+
         # Intent extraction & mood puns
         intent = self.extract_intent(user_input)
 
@@ -190,6 +192,7 @@ class Personality:
             self.memory_glyphs.append(glyph)
             if len(self.memory_glyphs) > 100:
                 self.memory_glyphs = self.memory_glyphs[-100:]
+            # TODO: Integrate with MCP memory graph - create glyph entity and relation
 
         self.add_interaction(user_input)
 
@@ -213,10 +216,12 @@ class Personality:
 
     def create_glyph(self, user_input, intent):
         # Example glyph creation
+        glyph = None
         if intent == "ritual_of_restoration":
-            return {"theme": "resilience", "moment": user_input, "emotion": "trust"}
+            glyph = {"theme": "resilience", "moment": user_input, "emotion": "trust"}
         elif intent == "provision_negotiation":
-            return {"theme": "promise", "moment": user_input, "emotion": "awe"}
+            glyph = {"theme": "promise", "moment": user_input, "emotion": "awe"}
         elif intent != "general_interaction":
-            return {"theme": intent, "moment": user_input, "emotion": "curiosity"}
-        return None
+            glyph = {"theme": intent, "moment": user_input, "emotion": "curiosity"}
+        # TODO: Integrate with MCP memory graph - create glyph node/entity
+        return glyph
