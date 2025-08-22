@@ -1,6 +1,6 @@
 module github.com/MyndScript/AGI
 
-go 1.24.5
+go 1.24.6
 
 require (
 	google.golang.org/grpc v1.75.0

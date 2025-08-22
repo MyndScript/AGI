@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  memory:
+    build: ./memory
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./memory:/app
+    restart: unless-stopped
+  agent:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      - memory
+    restart: unless-stopped
+  ui:
+    build: ./ui
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./ui:/app
+    depends_on:
+      - agent
+    restart: unless-stopped
