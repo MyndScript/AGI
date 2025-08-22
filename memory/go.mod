@@ -1,4 +1,4 @@
-module github.com/MyndScript/AGI
+module github.com/MyndScript/AGI/memory
 
 go 1.24.6
 

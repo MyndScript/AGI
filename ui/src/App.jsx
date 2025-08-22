@@ -4,8 +4,9 @@ import { useState } from 'react';
 import './App.css';
 
 function App() {
+  const agentName = 'Abigail';
   const [messages, setMessages] = useState([
-    { sender: 'agent', text: 'Hello! How can I help you today?' }
+    { sender: 'agent', text: `Hello! I'm ${agentName}, your personal AGI assistant. How can I help you today?` }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,7 +25,7 @@ function App() {
         body: JSON.stringify({ prompt: input })
       });
       const data = await res.json();
-      setMessages(prev => [...prev, { sender: 'agent', text: data.response || '...' }]);
+  setMessages(prev => [...prev, { sender: 'agent', text: data.response ? `${agentName}: ${data.response}` : `${agentName}: ...` }]);
     } catch (err) {
       setMessages(prev => [...prev, { sender: 'agent', text: 'Error connecting to agent backend.' }]);
     }
@@ -33,6 +34,10 @@ function App() {
 
   return (
     <div className="agi-ui">
+      <header className="agent-header">
+        <h1>{agentName} <span className="agent-role">(AGI Agent)</span></h1>
+        <p className="agent-persona">Abigail is your friendly, knowledgeable, and context-aware digital assistant.</p>
+      </header>
       <main className="main-panel">
         <section className="chat-panel">
           <div className="messages">
@@ -41,7 +46,7 @@ function App() {
                 <span>{msg.text}</span>
               </div>
             ))}
-            {loading && <div className="msg agent"><span>...</span></div>}
+            {loading && <div className="msg agent"><span>{agentName}: ...</span></div>}
           </div>
           <div className="chat-input">
             <input
