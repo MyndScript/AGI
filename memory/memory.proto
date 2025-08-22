@@ -1,3 +1,4 @@
+
 syntax = "proto3";
 
 package memory;
@@ -8,6 +9,9 @@ service UserMemoryService {
   rpc Set (SetRequest) returns (SetResponse);
   rpc Get (GetRequest) returns (GetResponse);
   rpc GetUserContext (UserContextRequest) returns (UserContextResponse);
+  rpc SetMoment (SetMomentRequest) returns (SetResponse);
+  rpc GetMoments (GetMomentsRequest) returns (GetMomentsResponse);
+  rpc SemanticSearch (SemanticSearchRequest) returns (SemanticSearchResponse);
 }
 
 message SetRequest {
@@ -36,4 +40,39 @@ message UserContextRequest {
 
 message UserContextResponse {
   string context = 1;
+}
+
+message Moment {
+  string id = 1;
+  string user_id = 2;
+  string summary = 3;
+  string emotion = 4;
+  string glyph = 5;
+  repeated string tags = 6;
+  int64 timestamp = 7;
+  string embedding = 8;
+}
+
+message SetMomentRequest {
+  Moment moment = 1;
+}
+
+message GetMomentsRequest {
+  string user_id = 1;
+  repeated string tags = 2;
+  int64 since = 3;
+  int64 until = 4;
+}
+
+message GetMomentsResponse {
+  repeated Moment moments = 1;
+}
+
+message SemanticSearchRequest {
+  string user_id = 1;
+  string query = 2;
+}
+
+message SemanticSearchResponse {
+  repeated Moment results = 1;
 }

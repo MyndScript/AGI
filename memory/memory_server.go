@@ -13,15 +13,28 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+type Moment struct {
+	ID        string
+	UserID    string
+	Summary   string
+	Emotion   string
+	Glyph     string
+	Tags      []string
+	Timestamp int64
+	Embedding string
+}
+
 type UserMemory struct {
 	mu      sync.RWMutex
 	storage map[string]map[string]string // userID -> key -> value
+	moments map[string][]*Moment         // userID -> moments
 }
 
 // NewUserMemory creates a new UserMemory instance.
 func NewUserMemory() *UserMemory {
 	return &UserMemory{
 		storage: make(map[string]map[string]string),
+		moments: make(map[string][]*Moment),
 	}
 }
 
@@ -29,6 +42,104 @@ func NewUserMemory() *UserMemory {
 type server struct {
 	pb.UnimplementedUserMemoryServiceServer
 	mem *UserMemory
+}
+
+// SetMoment stores a structured moment for a user.
+func (s *server) SetMoment(_ context.Context, req *pb.SetMomentRequest) (*pb.SetResponse, error) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	m := req.GetMoment()
+	moment := &Moment{
+		ID:        m.GetId(),
+		UserID:    m.GetUserId(),
+		Summary:   m.GetSummary(),
+		Emotion:   m.GetEmotion(),
+		Glyph:     m.GetGlyph(),
+		Tags:      m.GetTags(),
+		Timestamp: m.GetTimestamp(),
+		Embedding: m.GetEmbedding(),
+	}
+	s.mem.moments[moment.UserID] = append(s.mem.moments[moment.UserID], moment)
+	return &pb.SetResponse{Success: true}, nil
+}
+
+// GetMoments retrieves moments for a user, filtered by tags and time.
+func (s *server) GetMoments(_ context.Context, req *pb.GetMomentsRequest) (*pb.GetMomentsResponse, error) {
+	s.mem.mu.RLock()
+	defer s.mem.mu.RUnlock()
+	userID := req.GetUserId()
+	tags := req.GetTags()
+	since := req.GetSince()
+	until := req.GetUntil()
+	var results []*pb.Moment
+	for _, m := range s.mem.moments[userID] {
+		if (since == 0 || m.Timestamp >= since) && (until == 0 || m.Timestamp <= until) {
+			if len(tags) == 0 || hasTags(m.Tags, tags) {
+				results = append(results, &pb.Moment{
+					Id:        m.ID,
+					UserId:    m.UserID,
+					Summary:   m.Summary,
+					Emotion:   m.Emotion,
+					Glyph:     m.Glyph,
+					Tags:      m.Tags,
+					Timestamp: m.Timestamp,
+					Embedding: m.Embedding,
+				})
+			}
+		}
+	}
+	return &pb.GetMomentsResponse{Moments: results}, nil
+}
+
+// SemanticSearch performs a simple semantic search over moments (stub: matches summary/glyph/tags).
+func (s *server) SemanticSearch(_ context.Context, req *pb.SemanticSearchRequest) (*pb.SemanticSearchResponse, error) {
+	s.mem.mu.RLock()
+	defer s.mem.mu.RUnlock()
+	userID := req.GetUserId()
+	query := req.GetQuery()
+	var results []*pb.Moment
+	for _, m := range s.mem.moments[userID] {
+		if contains(m.Summary, query) || contains(m.Glyph, query) || tagsContain(m.Tags, query) {
+			results = append(results, &pb.Moment{
+				Id:        m.ID,
+				UserId:    m.UserID,
+				Summary:   m.Summary,
+				Emotion:   m.Emotion,
+				Glyph:     m.Glyph,
+				Tags:      m.Tags,
+				Timestamp: m.Timestamp,
+				Embedding: m.Embedding,
+			})
+		}
+	}
+	return &pb.SemanticSearchResponse{Results: results}, nil
+}
+
+// Helper functions
+func hasTags(momentTags, filterTags []string) bool {
+	tagSet := make(map[string]struct{})
+	for _, t := range momentTags {
+		tagSet[t] = struct{}{}
+	}
+	for _, ft := range filterTags {
+		if _, ok := tagSet[ft]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func contains(s, substr string) bool {
+	return len(substr) == 0 || (len(s) > 0 && (s == substr || (len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && (s[:len(substr)] == substr))))) || (len(s) > 0 && (len(substr) > 0 && (len(s) >= len(substr) && (s[len(s)-len(substr):] == substr)))))
+}
+
+func tagsContain(tags []string, query string) bool {
+	for _, t := range tags {
+		if t == query {
+			return true
+		}
+	}
+	return false
 }
 
 // Set stores a key-value pair for a user.

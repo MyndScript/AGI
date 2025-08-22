@@ -22,6 +22,9 @@ const (
 	UserMemoryService_Set_FullMethodName            = "/memory.UserMemoryService/Set"
 	UserMemoryService_Get_FullMethodName            = "/memory.UserMemoryService/Get"
 	UserMemoryService_GetUserContext_FullMethodName = "/memory.UserMemoryService/GetUserContext"
+	UserMemoryService_SetMoment_FullMethodName      = "/memory.UserMemoryService/SetMoment"
+	UserMemoryService_GetMoments_FullMethodName     = "/memory.UserMemoryService/GetMoments"
+	UserMemoryService_SemanticSearch_FullMethodName = "/memory.UserMemoryService/SemanticSearch"
 )
 
 // UserMemoryServiceClient is the client API for UserMemoryService service.
@@ -31,6 +34,9 @@ type UserMemoryServiceClient interface {
 	Set(ctx context.Context, in *SetRequest, opts ...grpc.CallOption) (*SetResponse, error)
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	GetUserContext(ctx context.Context, in *UserContextRequest, opts ...grpc.CallOption) (*UserContextResponse, error)
+	SetMoment(ctx context.Context, in *SetMomentRequest, opts ...grpc.CallOption) (*SetResponse, error)
+	GetMoments(ctx context.Context, in *GetMomentsRequest, opts ...grpc.CallOption) (*GetMomentsResponse, error)
+	SemanticSearch(ctx context.Context, in *SemanticSearchRequest, opts ...grpc.CallOption) (*SemanticSearchResponse, error)
 }
 
 type userMemoryServiceClient struct {
@@ -71,6 +77,36 @@ func (c *userMemoryServiceClient) GetUserContext(ctx context.Context, in *UserCo
 	return out, nil
 }
 
+func (c *userMemoryServiceClient) SetMoment(ctx context.Context, in *SetMomentRequest, opts ...grpc.CallOption) (*SetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetResponse)
+	err := c.cc.Invoke(ctx, UserMemoryService_SetMoment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userMemoryServiceClient) GetMoments(ctx context.Context, in *GetMomentsRequest, opts ...grpc.CallOption) (*GetMomentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMomentsResponse)
+	err := c.cc.Invoke(ctx, UserMemoryService_GetMoments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userMemoryServiceClient) SemanticSearch(ctx context.Context, in *SemanticSearchRequest, opts ...grpc.CallOption) (*SemanticSearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SemanticSearchResponse)
+	err := c.cc.Invoke(ctx, UserMemoryService_SemanticSearch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserMemoryServiceServer is the server API for UserMemoryService service.
 // All implementations must embed UnimplementedUserMemoryServiceServer
 // for forward compatibility.
@@ -78,6 +114,9 @@ type UserMemoryServiceServer interface {
 	Set(context.Context, *SetRequest) (*SetResponse, error)
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	GetUserContext(context.Context, *UserContextRequest) (*UserContextResponse, error)
+	SetMoment(context.Context, *SetMomentRequest) (*SetResponse, error)
+	GetMoments(context.Context, *GetMomentsRequest) (*GetMomentsResponse, error)
+	SemanticSearch(context.Context, *SemanticSearchRequest) (*SemanticSearchResponse, error)
 	mustEmbedUnimplementedUserMemoryServiceServer()
 }
 
@@ -96,6 +135,15 @@ func (UnimplementedUserMemoryServiceServer) Get(context.Context, *GetRequest) (*
 }
 func (UnimplementedUserMemoryServiceServer) GetUserContext(context.Context, *UserContextRequest) (*UserContextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetUserContext not implemented")
+}
+func (UnimplementedUserMemoryServiceServer) SetMoment(context.Context, *SetMomentRequest) (*SetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetMoment not implemented")
+}
+func (UnimplementedUserMemoryServiceServer) GetMoments(context.Context, *GetMomentsRequest) (*GetMomentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMoments not implemented")
+}
+func (UnimplementedUserMemoryServiceServer) SemanticSearch(context.Context, *SemanticSearchRequest) (*SemanticSearchResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SemanticSearch not implemented")
 }
 func (UnimplementedUserMemoryServiceServer) mustEmbedUnimplementedUserMemoryServiceServer() {}
 func (UnimplementedUserMemoryServiceServer) testEmbeddedByValue()                           {}
@@ -172,6 +220,60 @@ func _UserMemoryService_GetUserContext_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserMemoryService_SetMoment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetMomentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserMemoryServiceServer).SetMoment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserMemoryService_SetMoment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserMemoryServiceServer).SetMoment(ctx, req.(*SetMomentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserMemoryService_GetMoments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMomentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserMemoryServiceServer).GetMoments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserMemoryService_GetMoments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserMemoryServiceServer).GetMoments(ctx, req.(*GetMomentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserMemoryService_SemanticSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SemanticSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserMemoryServiceServer).SemanticSearch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserMemoryService_SemanticSearch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserMemoryServiceServer).SemanticSearch(ctx, req.(*SemanticSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserMemoryService_ServiceDesc is the grpc.ServiceDesc for UserMemoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +292,18 @@ var UserMemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserContext",
 			Handler:    _UserMemoryService_GetUserContext_Handler,
+		},
+		{
+			MethodName: "SetMoment",
+			Handler:    _UserMemoryService_SetMoment_Handler,
+		},
+		{
+			MethodName: "GetMoments",
+			Handler:    _UserMemoryService_GetMoments_Handler,
+		},
+		{
+			MethodName: "SemanticSearch",
+			Handler:    _UserMemoryService_SemanticSearch_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
