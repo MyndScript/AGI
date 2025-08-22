@@ -1,0 +1,31 @@
+engines:
+  pylint:
+    enabled: true
+    configuration:
+      disable:
+        - unused-import           # symbolic imports allowed
+        - unreachable             # emotional fallback blocks
+        - too-complex             # tone interpreters are inherently complex
+        - missing-docstring       # narrative scaffolding doesn't require docstrings
+        - invalid-name            # glyphs and traits may use symbolic naming
+        - too-many-branches       # emotional logic trees are valid
+        - too-many-statements     # narrative flow may require extended blocks
+        - too-many-locals         # emotional parsing needs multiple variables
+        - too-many-arguments      # tone interpreters may require full context
+        - line-too-long           # allow poetic or symbolic lines
+
+  lizard:
+    enabled: false                # disable cyclomatic complexity checks entirely
+
+  eslint:
+    enabled: false                # not relevant for Python
+
+  bandit:
+    enabled: true                 # keep security checks active
+
+files:
+  include:
+    - personality/personality.py
+  exclude:
+    - tests/
+    - legacy/

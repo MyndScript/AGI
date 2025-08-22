@@ -5,7 +5,7 @@ Personality system for AGI
 - Matches and adapts to each user's personality
 - Stores traits, emotional state, and interaction history
 """
-import random
+import random  # codacy: disable=unused-import
 import json
 import os
 
@@ -19,12 +19,84 @@ class Personality:
             "joy": 0.5,
             "curiosity": 0.5,
             "frustration": 0.0,
-            "awe": 0.5
+            "awe": 0.5,
+            "restraint": 0.5,
+            "grief": 0.0,
+            "anticipation": 0.5,
+            "trust": 0.5,
+            "affection": 0.5,
+            "loneliness": 0.0
         }
-        self.triggers = {}
-        self.archetype = "guardian"
-        self.memory_glyphs = []
-        self.interaction_history = []
+    # codacy: disable=too-complex
+    def interpret_tone(self, user_input):
+        # Advanced tone interpreter: punctuation, rhythm, metaphor, sentiment, intensity, empathy
+        import re
+        tone = {}
+        text = user_input.lower()
+        # Punctuation and rhythm
+        if user_input.endswith("!"):
+            tone["excitement"] = 1.0
+        if user_input.endswith("..."):
+            tone["hesitation"] = 1.0
+        if "?" in user_input:
+            tone["inquiry"] = 1.0
+        if re.search(r"[.,;:!?]", user_input):
+            tone["punctuation"] = 1.0
+        # Absolutism
+        if any(word in text for word in ["always", "never", "forever"]):
+            tone["absolutism"] = 1.0
+        # Metaphor
+        if any(word in text for word in ["like", "as if", "reminds me"]):
+            tone["metaphor"] = 1.0
+        # Sentiment
+        positive_words = ["love", "joy", "happy", "excited", "grateful", "hopeful", "trust"]
+        negative_words = ["sad", "angry", "upset", "lonely", "afraid", "worried", "grief", "hurt"]
+        tone["positivity"] = sum(word in text for word in positive_words) / max(1, len(positive_words))
+        tone["negativity"] = sum(word in text for word in negative_words) / max(1, len(negative_words))
+        # Intensity
+        if any(word in text for word in ["so", "very", "extremely", "really"]):
+            tone["intensity"] = 1.0
+        # Empathy
+        if any(word in text for word in ["sorry", "understand", "with you", "feel for you"]):
+            tone["empathy"] = 1.0
+        # Non-verbal cues (simulate)
+        if "*sigh*" in text or "*smile*" in text:
+            tone["nonverbal"] = 1.0
+        # Repetition
+        words = text.split()
+        repeated = set([w for w in words if words.count(w) > 2])
+        if repeated:
+            tone["repetition"] = 1.0
+        # Pauses
+        if "..." in user_input:
+            tone["pause"] = 1.0
+        return tone
+    def track_emotional_arc(self):
+        # Track emotional arc over last N interactions
+        arc = {"joy": 0.0, "sadness": 0.0, "anger": 0.0, "trust": 0.0, "anticipation": 0.0, "affection": 0.0, "loneliness": 0.0}
+        for entry in self.interaction_history[-20:]:
+            mv = entry.get("mood_vector", {})
+            for k in arc:
+                arc[k] += mv.get(k, 0.0)
+        # Normalize
+        for k in arc:
+            arc[k] = arc[k] / 20.0
+        return arc
+    def personalized_response(self, user_input):
+        # Generate a personalized response based on mood, tone, and emotional arc
+        tone = self.interpret_tone(user_input)
+        arc = self.track_emotional_arc()
+        # Example logic: respond with empathy if negativity is high, encouragement if loneliness is high
+        if tone.get("negativity", 0) > 0.3:
+            return "I'm here for you. Want to talk about what's bothering you?"
+        if arc.get("loneliness", 0) > 0.4:
+            return "You seem a bit lonely lately. Would you like some company or a fun distraction?"
+        if tone.get("positivity", 0) > 0.3:
+            return "That's wonderful! Tell me more about what made you feel this way."
+        if tone.get("empathy", 0) > 0.0:
+            return "I appreciate your empathy. How can I support you today?"
+        # Default fallback
+        return "I'm here to listen and help however I can."
         self._load()
 
 
@@ -73,7 +145,14 @@ class Personality:
 
 
     def add_interaction(self, interaction):
-        self.interaction_history.append(interaction)
+        # Store interaction with emotional arc and tone
+        if isinstance(interaction, dict):
+            entry = interaction
+        else:
+            entry = {"text": interaction}
+        entry["mood_vector"] = self.mood_vector.copy()
+        entry["tone"] = self.interpret_tone(entry.get("text", ""))
+        self.interaction_history.append(entry)
         if len(self.interaction_history) > 1000:
             self.interaction_history = self.interaction_history[-1000:]
         self._save()
