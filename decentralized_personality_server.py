@@ -11,6 +11,36 @@ import os
 app = FastAPI()
 personality_data = {}
 
+@app.post("/add-observation")
+async def add_observation(request: Request):
+    """
+    Add an interaction as an observation node for a user (for MCP memory graph integration).
+    """
+    data = await request.json()
+    user_id = data.get("user_id")
+    observation = data.get("observation")
+    if not user_id or not observation:
+        return {"success": False, "error": "Missing user_id or observation"}
+    # Store observation in personality_data (extend for MCP graph integration)
+    if user_id not in personality_data:
+        personality_data[user_id] = {}
+    if "observations" not in personality_data[user_id]:
+        personality_data[user_id]["observations"] = []
+    personality_data[user_id]["observations"].append(observation)
+    return {"success": True}
+"""
+[Memory]: FastAPI-based decentralized personality server for AGI.
+Exposes endpoints for user personality traits, mood, and context. Ready for P2P/libp2p integration.
+"""
+
+from fastapi import FastAPI, Request
+import uvicorn
+import json
+import os
+
+app = FastAPI()
+personality_data = {}
+
 @app.post("/set-personality")
 async def set_personality(request: Request):
     data = await request.json()

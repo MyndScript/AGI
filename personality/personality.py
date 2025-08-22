@@ -10,7 +10,24 @@ import os
 
 
 class Personality:
+    def emotional_drift(self, drift_strength=0.01):
+        """
+        Subtly shift mood vectors over time, simulating emotional weather.
+        Called periodically or at each interaction.
+        """
+        import random
+        for mood in self.mood_vector:
+            # Drift toward baseline (0.5) with small random fluctuation
+            baseline = 0.5
+            current = self.mood_vector[mood]
+            drift = drift_strength * (baseline - current) + random.uniform(-drift_strength, drift_strength)
+            self.mood_vector[mood] = max(0.0, min(1.0, current + drift))
+        self._save()
     def __init__(self, user_id, storage_path="personality_data"):
+        """
+        Initialize a Personality instance for a user.
+        Loads persistent data if available, otherwise sets defaults.
+        """
         self.user_id = user_id
         self.storage_path = storage_path
         self.traits = {}
@@ -26,6 +43,11 @@ class Personality:
             "affection": 0.5,
             "loneliness": 0.0
         }
+        self.triggers = {}
+        self.archetype = "guardian"
+        self.memory_glyphs = []
+        self.interaction_history = []
+        self._load()
     # codacy: disable=too-complex
     def interpret_tone(self, user_input):
         # Advanced tone interpreter: punctuation, rhythm, metaphor, sentiment, intensity, empathy
@@ -82,10 +104,40 @@ class Personality:
             arc[k] = arc[k] / 20.0
         return arc
     def personalized_response(self, user_input):
-        # Generate a personalized response based on mood, tone, and emotional arc
+        """
+        Generate a personalized response based on mood, tone, emotional arc, and current archetype.
+        Uses archetype-based response templates for dynamic, context-rich replies.
+        """
         tone = self.interpret_tone(user_input)
         arc = self.track_emotional_arc()
-        # Example logic: respond with empathy if negativity is high, encouragement if loneliness is high
+        archetype = getattr(self, "archetype", "guardian")
+        # Archetype-based response templates
+        templates = {
+            "guardian": [
+                "I'm here to protect and support you. What's on your mind?",
+                "You can trust me with your thoughts. How are you feeling?"
+            ],
+            "muse": [
+                "Let's explore your ideas together. What inspires you today?",
+                "Creativity flows between us. Share your vision."
+            ],
+            "strategist": [
+                "Let's plan your next move. What challenge are you facing?",
+                "I'm ready to help you strategize. What's the goal?"
+            ]
+        }
+
+        # Glyph recall: reference past glyphs if relevant
+        recall_phrase = None
+        for glyph in reversed(self.memory_glyphs[-10:]):
+            if glyph and isinstance(glyph, dict):
+                moment = glyph.get("moment", "")
+                theme = glyph.get("theme", "")
+                if moment and theme and (theme.lower() in user_input.lower() or moment.lower() in user_input.lower()):
+                    recall_phrase = f"This reminds me of when you mentioned {moment}. That felt like {theme}."
+                    break
+
+        # Dynamic selection based on mood/tone
         if tone.get("negativity", 0) > 0.3:
             return "I'm here for you. Want to talk about what's bothering you?"
         if arc.get("loneliness", 0) > 0.4:
@@ -94,6 +146,12 @@ class Personality:
             return "That's wonderful! Tell me more about what made you feel this way."
         if tone.get("empathy", 0) > 0.0:
             return "I appreciate your empathy. How can I support you today?"
+        if recall_phrase:
+            return recall_phrase
+        # Archetype fallback
+        if archetype in templates:
+            import random
+            return random.choice(templates[archetype])
         # Default fallback
         return "I'm here to listen and help however I can."
     # self._load()  # Unreachable code removed
@@ -104,10 +162,18 @@ class Personality:
 
 
     def _load(self):
+        """
+        Load personality data from persistent storage.
+        Handles missing or corrupted files gracefully.
+        """
         os.makedirs(self.storage_path, exist_ok=True)
         try:
             with open(self._get_file(), "r") as f:
-                data = json.load(f)
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError:
+                    print(f"[Personality] Warning: Corrupted data for user {self.user_id}, using defaults.")
+                    data = {}
                 self.traits = data.get("traits", {})
                 self.mood_vector = data.get("mood_vector", self.mood_vector)
                 self.triggers = data.get("triggers", {})
@@ -155,10 +221,25 @@ class Personality:
         if len(self.interaction_history) > 1000:
             self.interaction_history = self.interaction_history[-1000:]
         self._save()
-        # TODO: Integrate with MCP memory graph - add interaction as observation node
+
+        # Integrate with MCP memory graph - add interaction as observation node
+        try:
+            import requests
+            mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", "http://localhost:8002/add-observation")
+            payload = {
+                "user_id": self.user_id,
+                "observation": entry
+            }
+            response = requests.post(mcp_url, json=payload, timeout=2)
+            if response.status_code != 200:
+                print(f"[MCP] Failed to add observation: {response.text}")
+        except Exception as e:
+            print(f"[MCP] Error sending observation: {e}")
 
 
     def evolve(self, user_input):
+        # Apply emotional drift before processing input
+        self.emotional_drift()
         # Mood vectorization
         mood_updates = {}
         if "happy" in user_input:
@@ -181,7 +262,21 @@ class Personality:
         elif "plan" in user_input:
             self.archetype = "strategist"
 
-        # TODO: Integrate with MCP memory graph - update archetype node/relations
+        # Integrate with MCP memory graph - update archetype node/relations
+        try:
+            import requests
+            mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", "http://localhost:8002/set-personality")
+            payload = {
+                "user_id": self.user_id,
+                "archetype": self.archetype,
+                "traits": self.traits,
+                "mood_vector": self.mood_vector
+            }
+            response = requests.post(mcp_url, json=payload, timeout=2)
+            if response.status_code != 200:
+                print(f"[MCP] Failed to update archetype: {response.text}")
+        except Exception as e:
+            print(f"[MCP] Error updating archetype: {e}")
 
         # Intent extraction & mood puns
         intent = self.extract_intent(user_input)
@@ -192,7 +287,25 @@ class Personality:
             self.memory_glyphs.append(glyph)
             if len(self.memory_glyphs) > 100:
                 self.memory_glyphs = self.memory_glyphs[-100:]
-            # TODO: Integrate with MCP memory graph - create glyph entity and relation
+            # Integrate with MCP memory graph - create glyph entity and relation
+            try:
+                import requests
+                mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", "http://localhost:8002/add-observation")
+                payload = {
+                    "user_id": self.user_id,
+                    "observation": {
+                        "type": "glyph",
+                        "glyph": glyph,
+                        "archetype": self.archetype,
+                        "traits": self.traits,
+                        "mood_vector": self.mood_vector
+                    }
+                }
+                response = requests.post(mcp_url, json=payload, timeout=2)
+                if response.status_code != 200:
+                    print(f"[MCP] Failed to add glyph: {response.text}")
+            except Exception as e:
+                print(f"[MCP] Error sending glyph: {e}")
 
         self.add_interaction(user_input)
 
@@ -223,5 +336,23 @@ class Personality:
             glyph = {"theme": "promise", "moment": user_input, "emotion": "awe"}
         elif intent != "general_interaction":
             glyph = {"theme": intent, "moment": user_input, "emotion": "curiosity"}
-        # TODO: Integrate with MCP memory graph - create glyph node/entity
+        # Integrate with MCP memory graph - create glyph node/entity
+        try:
+            import requests
+            mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", "http://localhost:8002/add-observation")
+            payload = {
+                "user_id": self.user_id,
+                "observation": {
+                    "type": "glyph",
+                    "glyph": glyph,
+                    "archetype": self.archetype,
+                    "traits": self.traits,
+                    "mood_vector": self.mood_vector
+                }
+            }
+            response = requests.post(mcp_url, json=payload, timeout=2)
+            if response.status_code != 200:
+                print(f"[MCP] Failed to add glyph node: {response.text}")
+        except Exception as e:
+            print(f"[MCP] Error sending glyph node: {e}")
         return glyph
