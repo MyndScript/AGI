@@ -1,3 +1,4 @@
+
 """
 [Memory]: FastAPI-based decentralized agent server for AGI orchestration.
 Exposes endpoints for text generation, memory, and context. Ready for P2P/libp2p integration.
@@ -39,17 +40,17 @@ class UserMemoryClient:
 
     def get_user_context(self, user_id):
         req = memory_pb2.UserContextRequest(user_id=user_id)  # type: ignore[attr-defined]
-        resp = self.stub.GetUserContext(req)
+        resp = self.stub.GetUserContext(req) # pyright: ignore[reportAttributeAccessIssue]
         return resp.context
 
     def set(self, user_id, key, value):
         req = memory_pb2.SetRequest(user_id=user_id, key=key, value=value)  # type: ignore[attr-defined]
-        resp = self.stub.Set(req)
+        resp = self.stub.Set(req) # pyright: ignore[reportAttributeAccessIssue]
         return resp.success
 
     def get(self, user_id, key):
         req = memory_pb2.GetRequest(user_id=user_id, key=key)  # type: ignore[attr-defined]
-        resp = self.stub.Get(req)
+        resp = self.stub.Get(req) # pyright: ignore[reportAttributeAccessIssue]
         return resp.value if resp.found else None
 
 user_memory_client = UserMemoryClient()
@@ -94,3 +95,56 @@ async def text_generation(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+# Internal endpoints for Abigail's MCP toolbox (agent-only)
+@app.post("/abigail/trigger")
+async def abigail_trigger(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id", "default")
+    action = data.get("action")  # add, remove, list
+    word = data.get("word")
+    effect = data.get("effect")
+    personality = Personality(user_id)
+    if action == "add" and word and effect:
+        personality.add_trigger(word, effect)
+        return {"status": "added", "triggers": personality.list_triggers()}
+    elif action == "remove" and word:
+        personality.remove_trigger(word)
+        return {"status": "removed", "triggers": personality.list_triggers()}
+    elif action == "list":
+        return {"triggers": personality.list_triggers()}
+    return {"error": "invalid action or missing params"}
+
+@app.post("/abigail/glyph")
+async def abigail_glyph(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id", "default")
+    query = data.get("query")
+    personality = Personality(user_id)
+    glyph = personality.recall_glyph(query)
+    return {"glyph": glyph}
+
+@app.post("/abigail/mood")
+async def abigail_mood(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id", "default")
+    personality = Personality(user_id)
+    if "decay" in data:
+        personality.mood_decay()
+    return {"mood_vector": personality.mood_vector}
+
+@app.post("/abigail/archetype")
+async def abigail_archetype(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id", "default")
+    archetypes = data.get("archetypes")
+    personality = Personality(user_id)
+    if archetypes:
+        personality.fuse_archetypes(*archetypes)
+    return {"archetype": personality.archetype}
+
+@app.post("/abigail/memory")
+async def abigail_memory(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id", "default")
+    context = user_memory_client.get_user_context(user_id)
+    return {"user_context": context}

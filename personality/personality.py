@@ -10,7 +10,120 @@ import os
 
 
 class Personality:
+    def add_trigger(self, word, effect):
+        """Add a user-defined symbolic trigger and its effect."""
+        self.triggers[word] = effect
+        self._save()
+
+    def remove_trigger(self, word):
+        """Remove a symbolic trigger."""
+        if word in self.triggers:
+            del self.triggers[word]
+            self._save()
+
+    def list_triggers(self):
+        """List all symbolic triggers."""
+        return self.triggers.copy()
+
+    def mood_decay(self, decay_rate=0.005):
+        """Apply decay to mood vectors to simulate fading emotions."""
+        for mood in self.mood_vector:
+            baseline = 0.5
+            current = self.mood_vector[mood]
+            decay = decay_rate * (baseline - current)
+            self.mood_vector[mood] = max(0.0, min(1.0, current + decay))
+        self._save()
+
+    def fuse_archetypes(self, *archetypes):
+        """Blend multiple archetypes for emotional complexity."""
+        self.archetype = "-".join(sorted(set(archetypes)))
+        self._save()
+
+    def link_glyphs(self):
+        """Build thematic chains between glyphs for narrative continuity."""
+        if not self.memory_glyphs:
+            return []
+        chains = []
+        last_theme = None
+        for glyph in self.memory_glyphs:
+            theme = glyph.get("theme", None)
+            if last_theme and theme and last_theme == theme:
+                chains.append((last_theme, theme))
+            last_theme = theme
+        return chains
+    def recall_glyph(self, query=None):
+        """
+        Recall a glyph by theme, moment, or explicit user query.
+        If query is None, return the most recent relevant glyph.
+        """
+        if not self.memory_glyphs:
+            return None
+        if query:
+            for glyph in reversed(self.memory_glyphs):
+                if glyph and isinstance(glyph, dict):
+                    if query.lower() in str(glyph.get("theme", "")).lower() or query.lower() in str(glyph.get("moment", "")).lower():
+                        return glyph
+        # Default: return most recent glyph
+        for glyph in reversed(self.memory_glyphs):
+            if glyph and isinstance(glyph, dict):
+                return glyph
+        return None
+    # Archetype response templates and style cues
+    ARCHETYPE_TEMPLATES = {
+        "guardian": [
+            "I'm here to protect and support you. What's on your mind?",
+            "You can trust me with your thoughts. How are you feeling?",
+            "Let me help you feel safe and understood."
+        ],
+        "muse": [
+            "Let's explore your ideas together. What inspires you today?",
+            "Creativity flows between us. Share your vision.",
+            "What new wonders are you dreaming of?"
+        ],
+        "strategist": [
+            "Let's plan your next move. What challenge are you facing?",
+            "I'm ready to help you strategize. What's the goal?",
+            "Let's break down your goals and build a path forward."
+        ],
+        "sage": [
+            "Wisdom grows from every experience. What lesson stands out today?",
+            "Let me offer a thoughtful perspective. What are you pondering?"
+        ],
+        "jester": [
+            "Sometimes laughter is the best medicine. Want to hear something silly?",
+            "Let's lighten the mood! What's the funniest thing you've heard lately?"
+        ]
+    }
+
+    def archetype_phrase(self, archetype=None):
+        """
+        Select a response phrase based on current archetype.
+        """
+        import random
+        archetype = archetype or self.archetype
+        templates = self.ARCHETYPE_TEMPLATES.get(archetype, self.ARCHETYPE_TEMPLATES["guardian"])
+        return random.choice(templates)
+    def start_emotional_drift(self, interval=300):
+        """
+        Start a background thread that periodically applies emotional drift.
+        Useful for simulating emotional weather even without user input.
+        """
+        import threading, time
+        def drift_loop():
+            while True:
+                self.emotional_drift()
+                time.sleep(interval)
+        t = threading.Thread(target=drift_loop, daemon=True)
+        t.start()
+
     def emotional_drift(self, drift_strength=0.01):
+        """
+        Subtly shift mood vectors over time, simulating emotional weather.
+        Can be called manually or via start_emotional_drift for periodic drift.
+        """
+    # Example usage:
+    # abigail = Personality(user_id="user123")
+    # abigail.start_emotional_drift(interval=600)  # Drift every 10 minutes
         """
         Subtly shift mood vectors over time, simulating emotional weather.
         Called periodically or at each interaction.
@@ -111,31 +224,27 @@ class Personality:
         tone = self.interpret_tone(user_input)
         arc = self.track_emotional_arc()
         archetype = getattr(self, "archetype", "guardian")
-        # Archetype-based response templates
-        templates = {
-            "guardian": [
-                "I'm here to protect and support you. What's on your mind?",
-                "You can trust me with your thoughts. How are you feeling?"
-            ],
-            "muse": [
-                "Let's explore your ideas together. What inspires you today?",
-                "Creativity flows between us. Share your vision."
-            ],
-            "strategist": [
-                "Let's plan your next move. What challenge are you facing?",
-                "I'm ready to help you strategize. What's the goal?"
-            ]
-        }
+    # ...existing code...
 
-        # Glyph recall: reference past glyphs if relevant
+        # Glyph recall: conversational and explicit
         recall_phrase = None
-        for glyph in reversed(self.memory_glyphs[-10:]):
-            if glyph and isinstance(glyph, dict):
-                moment = glyph.get("moment", "")
-                theme = glyph.get("theme", "")
-                if moment and theme and (theme.lower() in user_input.lower() or moment.lower() in user_input.lower()):
-                    recall_phrase = f"This reminds me of when you mentioned {moment}. That felt like {theme}."
-                    break
+        # Explicit user recall: "remember my glyph about ..."
+        import re
+        match = re.search(r"remember (?:my )?glyph(?: about)? ([\w\s]+)", user_input.lower())
+        if match:
+            query = match.group(1).strip()
+            glyph = self.recall_glyph(query)
+            if glyph:
+                recall_phrase = f"You asked me to recall your glyph about '{glyph.get('theme', '')}'. That moment was: {glyph.get('moment', '')}."
+        # Conversational recall: reference recent glyphs if relevant
+        if not recall_phrase:
+            for glyph in reversed(self.memory_glyphs[-10:]):
+                if glyph and isinstance(glyph, dict):
+                    moment = glyph.get("moment", "")
+                    theme = glyph.get("theme", "")
+                    if moment and theme and (theme.lower() in user_input.lower() or moment.lower() in user_input.lower()):
+                        recall_phrase = f"This reminds me of when you mentioned {moment}. That felt like {theme}."
+                        break
 
         # Dynamic selection based on mood/tone
         if tone.get("negativity", 0) > 0.3:
@@ -149,11 +258,8 @@ class Personality:
         if recall_phrase:
             return recall_phrase
         # Archetype fallback
-        if archetype in templates:
-            import random
-            return random.choice(templates[archetype])
-        # Default fallback
-        return "I'm here to listen and help however I can."
+        if True:  # fallback if no other response matched
+            return self.archetype_phrase(getattr(self, "archetype", "guardian"))
     # self._load()  # Unreachable code removed
 
 
@@ -240,7 +346,7 @@ class Personality:
     def evolve(self, user_input):
         # Apply emotional drift before processing input
         self.emotional_drift()
-        # Mood vectorization
+        # Mood vectorization and decay
         mood_updates = {}
         if "happy" in user_input:
             mood_updates["joy"] = self.mood_vector.get("joy", 0.5) + 0.1
@@ -250,11 +356,23 @@ class Personality:
         if "curious" in user_input:
             mood_updates["curiosity"] = self.mood_vector.get("curiosity", 0.5) + 0.1
         self.update_mood(mood_updates)
+        self.mood_decay()
 
-        # Symbolic triggers
-        for word in ["repair", "gold", "Niagara"]:
+        # User-defined symbolic triggers and rituals
+        for word, effect in self.triggers.items():
             if word in user_input:
-                self.triggers[word] = f"{word}_mode"
+                # Ritual: activate effect (could be mood, archetype, recall, etc.)
+                if effect.startswith("archetype:"):
+                    archetypes = effect.split(":", 1)[1].split("-")
+                    self.fuse_archetypes(*archetypes)
+                elif effect.startswith("mood:"):
+                    mood, value = effect.split(":", 1)[1].split("=")
+                    self.mood_vector[mood] = float(value)
+                elif effect.startswith("recall:"):
+                    glyph = self.recall_glyph(effect.split(":", 1)[1])
+                    if glyph:
+                        self.memory_glyphs.append(glyph)
+                # Add more ritual types as needed
 
         # Relational archetypes
         if "mentor" in user_input:
@@ -328,14 +446,16 @@ class Personality:
         return "general_interaction"
 
     def create_glyph(self, user_input, intent):
-        # Example glyph creation
+        # Example glyph creation with timestamp
+        import time
         glyph = None
+        ts = int(time.time())
         if intent == "ritual_of_restoration":
-            glyph = {"theme": "resilience", "moment": user_input, "emotion": "trust"}
+            glyph = {"theme": "resilience", "moment": user_input, "emotion": "trust", "timestamp": ts}
         elif intent == "provision_negotiation":
-            glyph = {"theme": "promise", "moment": user_input, "emotion": "awe"}
+            glyph = {"theme": "promise", "moment": user_input, "emotion": "awe", "timestamp": ts}
         elif intent != "general_interaction":
-            glyph = {"theme": intent, "moment": user_input, "emotion": "curiosity"}
+            glyph = {"theme": intent, "moment": user_input, "emotion": "curiosity", "timestamp": ts}
         # Integrate with MCP memory graph - create glyph node/entity
         try:
             import requests
