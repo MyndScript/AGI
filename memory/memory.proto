@@ -1,9 +1,11 @@
 
+
+
 syntax = "proto3";
 
-package memory;
-
 option go_package = "github.com/MyndScript/AGI/memory/pb";
+
+// package memory; (removed for Python gRPC compatibility)
 
 service UserMemoryService {
   rpc Set (SetRequest) returns (SetResponse);
