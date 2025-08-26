@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 app = FastAPI()
+import json
 
 # Pydantic models based on your proto definitions
 class SetRequest(BaseModel):
@@ -74,8 +75,18 @@ def get_memory(req: GetRequest):
 
 @app.post("/user_context", response_model=UserContextResponse)
 def get_user_context(req: UserContextRequest):
-    context = user_contexts.get(req.user_id, "")
+    # Build context from memory_store
+    items = [(k, v) for (uid, k), v in memory_store.items() if uid == req.user_id]
+    count = len(items)
+    context = f"Total memory items: {count}\n"
+    for k, v in items:
+        context += f"{k}: {v}\n"
     return UserContextResponse(context=context)
+@app.post("/dump_memory")
+def dump_memory(req: UserContextRequest):
+    # Return all key-value pairs for a user
+    mem = {k: v for (uid, k), v in memory_store.items() if uid == req.user_id}
+    return {"memory": mem}
 
 @app.post("/set_moment", response_model=SetResponse)
 def set_moment(req: SetMomentRequest):

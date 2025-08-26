@@ -1,3 +1,6 @@
 fastapi
 uvicorn
 transformers
+httpx
+python-multipart
+torch

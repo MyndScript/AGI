@@ -11,6 +11,7 @@ import os
 
 class Personality:
     def add_trigger(self, word, effect):
+
         """Add a user-defined symbolic trigger and its effect."""
         self.triggers[word] = effect
         self._save()
@@ -56,18 +57,29 @@ class Personality:
         Recall a glyph by theme, moment, or explicit user query.
         If query is None, return the most recent relevant glyph.
         """
+        def find_by_query(glyphs, query):
+            q = query.lower()
+            for glyph in reversed(glyphs):
+                if glyph and isinstance(glyph, dict):
+                    theme = str(glyph.get("theme", "")).lower()
+                    moment = str(glyph.get("moment", "")).lower()
+                    if q in theme or q in moment:
+                        return glyph
+            return None
+
+        def find_most_recent(glyphs):
+            for glyph in reversed(glyphs):
+                if glyph and isinstance(glyph, dict):
+                    return glyph
+            return None
+
         if not self.memory_glyphs:
             return None
         if query:
-            for glyph in reversed(self.memory_glyphs):
-                if glyph and isinstance(glyph, dict):
-                    if query.lower() in str(glyph.get("theme", "")).lower() or query.lower() in str(glyph.get("moment", "")).lower():
-                        return glyph
-        # Default: return most recent glyph
-        for glyph in reversed(self.memory_glyphs):
-            if glyph and isinstance(glyph, dict):
-                return glyph
-        return None
+            result = find_by_query(self.memory_glyphs, query)
+            if result:
+                return result
+        return find_most_recent(self.memory_glyphs)
     # Archetype response templates and style cues
     ARCHETYPE_TEMPLATES = {
         "guardian": [
@@ -94,7 +106,16 @@ class Personality:
             "Let's lighten the mood! What's the funniest thing you've heard lately?"
         ]
     }
-
+    def _send_mcp_request(self, endpoint, payload, error_prefix="[MCP]"):
+        import requests
+        mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", f"http://localhost:8002/{endpoint}")
+        try:
+            response = requests.post(mcp_url, json=payload, timeout=2)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"{error_prefix} request failed: {e}")
+        except Exception as e:
+            print(f"{error_prefix} Unexpected error: {e}")
     def archetype_phrase(self, archetype=None):
         """
         Select a response phrase based on current archetype.
@@ -167,42 +188,73 @@ class Personality:
         import re
         tone = {}
         text = user_input.lower()
-        # Punctuation and rhythm
-        if user_input.endswith("!"):
+
+        def check_excitement(text):
+            return text.endswith("!")
+
+        def check_hesitation(text):
+            return text.endswith("...")
+
+        def check_inquiry(text):
+            return "?" in text
+
+        def check_punctuation(text):
+            return bool(re.search(r"[.,;:!?]", text))
+
+        def check_absolutism(text):
+            return any(word in text for word in ["always", "never", "forever"])
+
+        def check_metaphor(text):
+            return any(word in text for word in ["like", "as if", "reminds me"])
+
+        def check_sentiment(text):
+            positive_words = ["love", "joy", "happy", "excited", "grateful", "hopeful", "trust"]
+            negative_words = ["sad", "angry", "upset", "lonely", "afraid", "worried", "grief", "hurt"]
+            return (
+                sum(word in text for word in positive_words) / max(1, len(positive_words)),
+                sum(word in text for word in negative_words) / max(1, len(negative_words))
+            )
+
+        def check_intensity(text):
+            return any(word in text for word in ["so", "very", "extremely", "really"])
+
+        def check_empathy(text):
+            return any(word in text for word in ["sorry", "understand", "with you", "feel for you"])
+
+        def check_nonverbal(text):
+            return "*sigh*" in text or "*smile*" in text
+
+        def check_repetition(words):
+            return any(words.count(w) > 2 for w in set(words))
+
+        def check_pause(text):
+            return "..." in text
+
+        if check_excitement(user_input):
             tone["excitement"] = 1.0
-        if user_input.endswith("..."):
+        if check_hesitation(user_input):
             tone["hesitation"] = 1.0
-        if "?" in user_input:
+        if check_inquiry(user_input):
             tone["inquiry"] = 1.0
-        if re.search(r"[.,;:!?]", user_input):
+        if check_punctuation(user_input):
             tone["punctuation"] = 1.0
-        # Absolutism
-        if any(word in text for word in ["always", "never", "forever"]):
+        if check_absolutism(text):
             tone["absolutism"] = 1.0
-        # Metaphor
-        if any(word in text for word in ["like", "as if", "reminds me"]):
+        if check_metaphor(text):
             tone["metaphor"] = 1.0
-        # Sentiment
-        positive_words = ["love", "joy", "happy", "excited", "grateful", "hopeful", "trust"]
-        negative_words = ["sad", "angry", "upset", "lonely", "afraid", "worried", "grief", "hurt"]
-        tone["positivity"] = sum(word in text for word in positive_words) / max(1, len(positive_words))
-        tone["negativity"] = sum(word in text for word in negative_words) / max(1, len(negative_words))
-        # Intensity
-        if any(word in text for word in ["so", "very", "extremely", "really"]):
+        pos, neg = check_sentiment(text)
+        tone["positivity"] = pos
+        tone["negativity"] = neg
+        if check_intensity(text):
             tone["intensity"] = 1.0
-        # Empathy
-        if any(word in text for word in ["sorry", "understand", "with you", "feel for you"]):
+        if check_empathy(text):
             tone["empathy"] = 1.0
-        # Non-verbal cues (simulate)
-        if "*sigh*" in text or "*smile*" in text:
+        if check_nonverbal(text):
             tone["nonverbal"] = 1.0
-        # Repetition
         words = text.split()
-        repeated = set([w for w in words if words.count(w) > 2])
-        if repeated:
+        if check_repetition(words):
             tone["repetition"] = 1.0
-        # Pauses
-        if "..." in user_input:
+        if check_pause(user_input):
             tone["pause"] = 1.0
         return tone
     def track_emotional_arc(self):
@@ -224,42 +276,38 @@ class Personality:
         tone = self.interpret_tone(user_input)
         arc = self.track_emotional_arc()
         archetype = getattr(self, "archetype", "guardian")
-    # ...existing code...
 
-        # Glyph recall: conversational and explicit
-        recall_phrase = None
-        # Explicit user recall: "remember my glyph about ..."
-        import re
-        match = re.search(r"remember (?:my )?glyph(?: about)? ([\w\s]+)", user_input.lower())
-        if match:
-            query = match.group(1).strip()
-            glyph = self.recall_glyph(query)
-            if glyph:
-                recall_phrase = f"You asked me to recall your glyph about '{glyph.get('theme', '')}'. That moment was: {glyph.get('moment', '')}."
-        # Conversational recall: reference recent glyphs if relevant
-        if not recall_phrase:
+        def get_recall_phrase(user_input):
+            import re
+            match = re.search(r"remember (?:my )?glyph(?: about)? ([\w\s]+)", user_input.lower())
+            if match:
+                query = match.group(1).strip()
+                glyph = self.recall_glyph(query)
+                if glyph:
+                    return f"You asked me to recall your glyph about '{glyph.get('theme', '')}'. That moment was: {glyph.get('moment', '')}."
             for glyph in reversed(self.memory_glyphs[-10:]):
                 if glyph and isinstance(glyph, dict):
                     moment = glyph.get("moment", "")
                     theme = glyph.get("theme", "")
                     if moment and theme and (theme.lower() in user_input.lower() or moment.lower() in user_input.lower()):
-                        recall_phrase = f"This reminds me of when you mentioned {moment}. That felt like {theme}."
-                        break
+                        return f"This reminds me of when you mentioned {moment}. That felt like {theme}."
+            return None
 
-        # Dynamic selection based on mood/tone
-        if tone.get("negativity", 0) > 0.3:
-            return "I'm here for you. Want to talk about what's bothering you?"
-        if arc.get("loneliness", 0) > 0.4:
-            return "You seem a bit lonely lately. Would you like some company or a fun distraction?"
-        if tone.get("positivity", 0) > 0.3:
-            return "That's wonderful! Tell me more about what made you feel this way."
-        if tone.get("empathy", 0) > 0.0:
-            return "I appreciate your empathy. How can I support you today?"
-        if recall_phrase:
-            return recall_phrase
-        # Archetype fallback
-        if True:  # fallback if no other response matched
+        def select_response(tone, arc, recall_phrase):
+            if tone.get("negativity", 0) > 0.3:
+                return "I'm here for you. Want to talk about what's bothering you?"
+            if arc.get("loneliness", 0) > 0.4:
+                return "You seem a bit lonely lately. Would you like some company or a fun distraction?"
+            if tone.get("positivity", 0) > 0.3:
+                return "That's wonderful! Tell me more about what made you feel this way."
+            if tone.get("empathy", 0) > 0.0:
+                return "I appreciate your empathy. How can I support you today?"
+            if recall_phrase:
+                return recall_phrase
             return self.archetype_phrase(getattr(self, "archetype", "guardian"))
+
+        recall_phrase = get_recall_phrase(user_input)
+        return select_response(tone, arc, recall_phrase)
     # self._load()  # Unreachable code removed
 
 
@@ -381,20 +429,16 @@ class Personality:
             self.archetype = "strategist"
 
         # Integrate with MCP memory graph - update archetype node/relations
-        try:
-            import requests
-            mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", "http://localhost:8002/set-personality")
-            payload = {
+        self._send_mcp_request(
+            "set-personality",
+            {
                 "user_id": self.user_id,
                 "archetype": self.archetype,
                 "traits": self.traits,
                 "mood_vector": self.mood_vector
-            }
-            response = requests.post(mcp_url, json=payload, timeout=2)
-            if response.status_code != 200:
-                print(f"[MCP] Failed to update archetype: {response.text}")
-        except Exception as e:
-            print(f"[MCP] Error updating archetype: {e}")
+            },
+            error_prefix="[SECURITY] MCP archetype update"
+        )
 
         # Intent extraction & mood puns
         intent = self.extract_intent(user_input)
@@ -406,10 +450,9 @@ class Personality:
             if len(self.memory_glyphs) > 100:
                 self.memory_glyphs = self.memory_glyphs[-100:]
             # Integrate with MCP memory graph - create glyph entity and relation
-            try:
-                import requests
-                mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", "http://localhost:8002/add-observation")
-                payload = {
+            self._send_mcp_request(
+                "add-observation",
+                {
                     "user_id": self.user_id,
                     "observation": {
                         "type": "glyph",
@@ -418,12 +461,9 @@ class Personality:
                         "traits": self.traits,
                         "mood_vector": self.mood_vector
                     }
-                }
-                response = requests.post(mcp_url, json=payload, timeout=2)
-                if response.status_code != 200:
-                    print(f"[MCP] Failed to add glyph: {response.text}")
-            except Exception as e:
-                print(f"[MCP] Error sending glyph: {e}")
+                },
+                error_prefix="[MCP] Glyph add"
+            )
 
         self.add_interaction(user_input)
 
@@ -470,9 +510,11 @@ class Personality:
                     "mood_vector": self.mood_vector
                 }
             }
-            response = requests.post(mcp_url, json=payload, timeout=2)
-            if response.status_code != 200:
-                print(f"[MCP] Failed to add glyph node: {response.text}")
+            try:
+                response = requests.post(mcp_url, json=payload, timeout=2)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                print(f"[SECURITY] MCP glyph node request failed: {e}")
         except Exception as e:
-            print(f"[MCP] Error sending glyph node: {e}")
+            print(f"[SECURITY] Unexpected error sending glyph node: {e}")
         return glyph

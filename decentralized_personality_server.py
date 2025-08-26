@@ -28,18 +28,6 @@ async def add_observation(request: Request):
         personality_data[user_id]["observations"] = []
     personality_data[user_id]["observations"].append(observation)
     return {"success": True}
-"""
-[Memory]: FastAPI-based decentralized personality server for AGI.
-Exposes endpoints for user personality traits, mood, and context. Ready for P2P/libp2p integration.
-"""
-
-from fastapi import FastAPI, Request
-import uvicorn
-import json
-import os
-
-app = FastAPI()
-personality_data = {}
 
 @app.post("/set-personality")
 async def set_personality(request: Request):

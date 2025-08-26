@@ -75,8 +75,19 @@ var userContexts = make(map[string]string)
 
 func main() {
 	r := gin.Default()
+	// Debug endpoint: dump all key-value pairs for a user
+	r.POST("/dump_memory", func(c *gin.Context) {
+		var req UserContextRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+			return
+		}
+		mem := memoryStore[req.UserID]
+		c.JSON(http.StatusOK, gin.H{"memory": mem})
+	})
 
-	r.POST("/set", func(c *gin.Context) {
+	// Python-compatible endpoints
+	r.POST("/set-memory", func(c *gin.Context) {
 		var req SetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, SetResponse{Success: false})
@@ -93,17 +104,21 @@ func main() {
 		c.JSON(http.StatusBadRequest, SetResponse{Success: false})
 	})
 
-	r.POST("/get", func(c *gin.Context) {
+	r.POST("/get-memory", func(c *gin.Context) {
 		var req GetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, GetResponse{Found: false})
 			return
 		}
-		value, found := memoryStore[req.UserID][req.Key]
+		var value string
+		var found bool
+		if mem, ok := memoryStore[req.UserID]; ok {
+			value, found = mem[req.Key]
+		}
 		c.JSON(http.StatusOK, GetResponse{Value: value, Found: found})
 	})
 
-	r.POST("/user_context", func(c *gin.Context) {
+	r.POST("/get-user-context", func(c *gin.Context) {
 		var req UserContextRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, UserContextResponse{Context: ""})

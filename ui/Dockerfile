@@ -1,7 +1,9 @@
 # AGI UI Dockerfile
-FROM node:20-alpine
+FROM node:20
 WORKDIR /app
+COPY package*.json ./
+RUN npm install --legacy-peer-deps
 COPY . .
-RUN npm install
-EXPOSE 5173
-CMD ["npm", "run", "dev"]
+RUN npm run build
+EXPOSE 3000
+CMD ["npx", "serve", "dist", "-l", "3000"]

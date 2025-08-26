@@ -1,5 +1,5 @@
 
-
+import React from 'react';
 import { useState } from 'react';
 import './App.css';
 
@@ -10,8 +10,28 @@ function App() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // chat | journal | facebook
+  const [activeTab, setActiveTab] = useState('chat'); // chat | journal | facebook | memory
   const [fbUploadStatus, setFbUploadStatus] = useState('');
+
+  // Memory Viewer State
+  const [memoryView, setMemoryView] = useState('');
+  const [memoryLoading, setMemoryLoading] = useState(false);
+
+  const handleViewMemory = async () => {
+    setMemoryLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/abigail/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'default' })
+      });
+      const data = await res.json();
+      setMemoryView(data.user_context || 'No memory found.');
+    } catch (err) {
+      setMemoryView('Error fetching memory.');
+    }
+    setMemoryLoading(false);
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -65,6 +85,7 @@ function App() {
           <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'active' : ''}>Chat</button>
           <button onClick={() => setActiveTab('journal')} className={activeTab === 'journal' ? 'active' : ''}>Journal</button>
           <button onClick={() => setActiveTab('facebook')} className={activeTab === 'facebook' ? 'active' : ''}>Import Facebook Data</button>
+          <button onClick={() => setActiveTab('memory')} className={activeTab === 'memory' ? 'active' : ''}>View Memory</button>
         </nav>
       </header>
       <main className="main-panel">
@@ -107,6 +128,18 @@ function App() {
           <section className="journal-panel">
             <h2>Journal Entry (Coming Soon)</h2>
             <p>You'll be able to add personal journal entries for Abigail to learn from.</p>
+          </section>
+        )}
+        {activeTab === 'memory' && (
+          <section className="memory-panel">
+            <h2>Abigail's Learned Memory</h2>
+            <button onClick={handleViewMemory} disabled={memoryLoading} style={{marginBottom: '1em'}}>
+              {memoryLoading ? 'Loading...' : 'Refresh Memory'}
+            </button>
+            <pre className="memory-view" style={{background:'#f9f9f9',padding:'1em',borderRadius:'6px',maxHeight:'400px',overflow:'auto'}}>
+              {memoryView}
+            </pre>
+            <p className="memory-privacy">This is what Abigail has learned and stored in her memory. Only you can view this.</p>
           </section>
         )}
       </main>
