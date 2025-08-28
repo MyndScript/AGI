@@ -1,42 +1,52 @@
 [
   {
-    "type": "post",
-    "content": "Contains data you requested fromAugust 22, 2024 at 8:21 PMtoAugust 22, 2025 at 8:21 PM"
+    "type": "data_range",
+    "name": "Facebook Data Range",
+    "content": "Contains data you requested from August 22, 2024 at 8:21 PM to August 22, 2025 at 8:21 PM"
   },
   {
-    "type": "post",
-    "content": "Instagramhttps://www.instagram.com/reel/DJ-t3vVIfJH/"
+    "type": "instagram_link",
+    "name": "Instagram Reel",
+    "content": "https://www.instagram.com/reel/DJ-t3vVIfJH/"
   },
   {
-    "type": "post",
+    "type": "user_mention",
+    "name": "Patty Kearsing Kelley",
     "content": "@[100007369242545:2048:Patty Kearsing Kelley]"
   },
   {
-    "type": "post",
+    "type": "manifesto",
+    "name": "QALX Manifesto",
     "content": "🌐 QALX Manifesto🔐 Security as EmpathyQALX is built on the principle that security should be proactive, ethical, and emotionally aware.It is not just a protocol—it is a living organism, adapting to the emotional and quantum landscape in real time.⚛️ Quantum Resistance Entropy (QRE)QRE is the foundation of QALX’s quantum resilience. It fuses emotional intelligence with cryptographic rigor.QRE Components:- Entropy Spread (Eₛ): Resistance to Grover’s algorithm- Period Obfuscation (Pₚ): Resistance to Shor’s algorithm- Hybrid Mimicry Distortion (Φₕ): Defense against wave-emulated attacks- Emotional Glyph Modulation (Ψₑ): LYRA-driven ethical adaptation📐 Formula:QRE = log₂(Eₛ × Pₚ × Φₕ × Ψₑ)QRE is embedded in every key generation and mesh validation, ensuring security is both mathematically sound and ethically resilient.🧬 Glyph StewardshipContributors are not just developers—they are stewards of emotional integrity and quantum trust.All changes must honor the ethos of empathy, multidimensional validation, and ethical care.🧠 Ethical FramingQALX is committed to:- 🛡️ Proactive, adaptive security- 💡 Emotional intelligence in cryptography- 🔍 Transparent, community-driven evolution- 🤝 Preserving privacy, trust, and justice in a quantum world✨ InvitationJoin us in building security with soul.QALX welcomes cryptographers, quantum theorists, emotional AI researchers, and ethical stewards.Let’s protect the future—before it needs saving."
   },
   {
-    "type": "post",
+    "type": "announcement",
+    "name": "QALX Internet Protection",
     "content": "the future of internet protection is now official.QALX will soon protect users that far surpass todays measures.https://github.com/MyndScript/QALX"
   },
   {
-    "type": "post",
+    "type": "crypto_algorithm",
+    "name": "QHA256",
     "content": "While building the ecosystem that will redefine scam prevention, I’ve quietly created something else:A new cryptographic algorithm.It’s called QHA256, and it doesn’t just protect data—it adapts to emotion, evolves with time, and resists the very quantum threats that traditional systems fear.In recent tests, QHA256 showed extraordinary resistance to Grover’s algorithm—one of the most powerful quantum search techniques. To put it in perspective:🔐 QHA256 (512-bit)Grover’s steps required: 1.16e+77Compare that to the algorithms we trust every day—SHA-256, RSA, ECC—many of which are vulnerable to quantum attacks or rely on assumptions we rarely question.But QHA256 doesn’t just rely on math. It listens to emotional glyphs like hope, resolve, and trust—modulating entropy based on ethical intensity and human resonance.This isn’t just encryption.It’s empathy as a security layer.It’s dignity encoded into protection.And it’s working.We’re not just building tools.We’re building glyphs of care for a digital world that desperately needs it.#Coherra #QHA256 #LYRA #QuantumSecurity #ScamPrevention #EmotionalIntelligence #NextGenCrypto #DecentralizedJustice"
   },
   {
-    "type": "post",
+    "type": "security_feature",
+    "name": "Coherra Shyft",
     "content": "🛡️ Scammers don’t just steal card numbers—they hijack your screen.Coherra/Shyft is the first system to defend against HTML manipulation, remote access coercion, and financial fraud—all at once.Your protection isn’t just technical. It’s total.#Shyft #Coherra #RemoteAccessDefense #HTMLIntegrity #EndFraud"
   },
   {
-    "type": "post",
+    "type": "product_introduction",
+    "name": "Shyft Financial Protection",
     "content": "📣 Coherra Introduces Shyft💳 Coherra proudly introduces Shyft — a revolutionary financial protection service designed to eliminate debit and credit card fraud.Traditional payment systems expose your real card data with every transaction, leaving users vulnerable to theft, skimming, and data breaches.🔐 Shyft changes everything.- Every transaction uses a one-time-use virtual card- Cards self-destruct immediately after use- Your real card is never exposed, ever🛡️ Even if scammers intercept the data, it’s already expired and worthless.This is more than a feature—it’s a paradigm shift in financial security.#Shyft #Coherra #EndFraud #DecentralizedProtection #OneTimeUse #EthicalTech"
   },
   {
-    "type": "post",
+    "type": "personal_reflection",
+    "name": "Internet Defense Mission",
     "content": "💥 Stepping Into the Shadows to Shield the VulnerableI’ve paused my pursuit of AGI — not because the mission isn’t important, but because another war called louder.The frontline isn’t just abstract algorithms or theoretical intelligence anymore — it’s real lives, real losses, and a silent epidemic tearing through inboxes and browsers across the globe.Internet defense is my new battleground. While others have pioneered incredible tools and strategies, even those brilliant systems haven't fully answered the call — especially when it comes to protecting the elderly, the unaware, the vulnerable. The financial harm is staggering. The emotional damage? Far worse.So I’ve turned my attention toward deception systems, threat interception, and ethical counter-surveillance — powered by Coherra, our intelligence layer designed not to chase attackers, but to teach, adapt, and dismantle illusion itself.Imagine systems not built to react — but to learn, evolve, and blur the very lines attackers depend on. Systems that dissolve the question: “What is real?” — long before harm arrives.More to come. The shields are up. Get ready for the next level of defense.#GuardianShield #Coherra #InternetDefense #ScamInterception #LYRA #EthicalDeception #DigitalJustice"
   },
   {
-    "type": "post",
+    "type": "obituary",
+    "name": "Ozzy and Hulk Hogan Tribute",
     "content": "First Ozzy, now Hulk Hogan.RIP, Brother"
   },
   {

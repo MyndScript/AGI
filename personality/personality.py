@@ -80,32 +80,6 @@ class Personality:
             if result:
                 return result
         return find_most_recent(self.memory_glyphs)
-    # Archetype response templates and style cues
-    ARCHETYPE_TEMPLATES = {
-        "guardian": [
-            "I'm here to protect and support you. What's on your mind?",
-            "You can trust me with your thoughts. How are you feeling?",
-            "Let me help you feel safe and understood."
-        ],
-        "muse": [
-            "Let's explore your ideas together. What inspires you today?",
-            "Creativity flows between us. Share your vision.",
-            "What new wonders are you dreaming of?"
-        ],
-        "strategist": [
-            "Let's plan your next move. What challenge are you facing?",
-            "I'm ready to help you strategize. What's the goal?",
-            "Let's break down your goals and build a path forward."
-        ],
-        "sage": [
-            "Wisdom grows from every experience. What lesson stands out today?",
-            "Let me offer a thoughtful perspective. What are you pondering?"
-        ],
-        "jester": [
-            "Sometimes laughter is the best medicine. Want to hear something silly?",
-            "Let's lighten the mood! What's the funniest thing you've heard lately?"
-        ]
-    }
     def _send_mcp_request(self, endpoint, payload, error_prefix="[MCP]"):
         import requests
         mcp_url = os.environ.get("MCP_PERSONALITY_SERVER_URL", f"http://localhost:8002/{endpoint}")
@@ -116,14 +90,6 @@ class Personality:
             print(f"{error_prefix} request failed: {e}")
         except Exception as e:
             print(f"{error_prefix} Unexpected error: {e}")
-    def archetype_phrase(self, archetype=None):
-        """
-        Select a response phrase based on current archetype.
-        """
-        import random
-        archetype = archetype or self.archetype
-        templates = self.ARCHETYPE_TEMPLATES.get(archetype, self.ARCHETYPE_TEMPLATES["guardian"])
-        return random.choice(templates)
     def start_emotional_drift(self, interval=300):
         """
         Start a background thread that periodically applies emotional drift.
@@ -271,7 +237,7 @@ class Personality:
     def personalized_response(self, user_input):
         """
         Generate a personalized response based on mood, tone, emotional arc, and current archetype.
-        Uses archetype-based response templates for dynamic, context-rich replies.
+        No longer uses archetype-based response templates; responses are generated contextually.
         """
         tone = self.interpret_tone(user_input)
         arc = self.track_emotional_arc()
@@ -304,7 +270,7 @@ class Personality:
                 return "I appreciate your empathy. How can I support you today?"
             if recall_phrase:
                 return recall_phrase
-            return self.archetype_phrase(getattr(self, "archetype", "guardian"))
+            return "How can I help you today?"
 
         recall_phrase = get_recall_phrase(user_input)
         return select_response(tone, arc, recall_phrase)
@@ -518,3 +484,13 @@ class Personality:
         except Exception as e:
             print(f"[SECURITY] Unexpected error sending glyph node: {e}")
         return glyph
+
+    def recalculate_mood(self):
+        """Recalculate mood vector based on current archetype and recent interactions."""
+        self.mood_decay()
+        if hasattr(self, 'archetype') and self.archetype:
+            if 'joy' in self.archetype:
+                self.mood_vector['joy'] = min(1.0, self.mood_vector.get('joy', 0.5) + 0.1)
+            if 'sadness' in self.archetype:
+                self.mood_vector['sadness'] = min(1.0, self.mood_vector.get('sadness', 0.5) + 0.1)
+        self._save()

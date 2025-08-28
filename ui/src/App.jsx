@@ -1,6 +1,4 @@
-
-import React from 'react';
-import { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 
 function App() {
@@ -10,12 +8,90 @@ function App() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // chat | journal | facebook | memory
+  const [activeTab, setActiveTab] = useState('chat');
   const [fbUploadStatus, setFbUploadStatus] = useState('');
-
-  // Memory Viewer State
+  const [fbUploadSummary, setFbUploadSummary] = useState(null);
+  const [fbPublicApprove, setFbPublicApprove] = useState(false);
   const [memoryView, setMemoryView] = useState('');
   const [memoryLoading, setMemoryLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  // Scroll to bottom when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  // Automated agent decision logic for backend endpoint selection
+  const handleSend = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = { sender: 'user', text: input };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
+    try {
+      // Decision logic: choose endpoint(s) based on input
+      let endpoint = 'generate';
+      let payload = { prompt: input, user_id: 'default' };
+      let agentResponse = '';
+
+      // Example: if user asks about personality, mood, or traits, use personality endpoints
+      if (/personality|traits|archetype|mood|context/i.test(input)) {
+        endpoint = 'get-personality-context';
+        payload = { user_id: 'default' };
+        const res = await fetch('http://localhost:8002/get-personality-context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        agentResponse = data.context || 'No personality context found.';
+      } else if (/memory|remember|recall|learned/i.test(input)) {
+        endpoint = 'abigail/memory';
+        payload = { user_id: 'default' };
+        const res = await fetch('http://localhost:8000/abigail/memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        agentResponse = data.user_context || 'No memory found.';
+      } else if (/observe|observation|journal|note/i.test(input)) {
+        endpoint = 'add-observation';
+        payload = { user_id: 'default', observation: input };
+        const res = await fetch('http://localhost:8002/add-observation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        agentResponse = data.success ? 'Observation added.' : (data.error || 'Failed to add observation.');
+      } else {
+        // Default: use chat/generate endpoint
+        const res = await fetch('http://localhost:8000/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        agentResponse = data.response ? `${agentName}: ${data.response}` : `${agentName}: ...`;
+      }
+
+      setMessages(prev => [
+        ...prev,
+        { sender: 'agent', text: agentResponse }
+      ]);
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        { sender: 'agent', text: 'Error connecting to agent backend.' }
+      ]);
+    }
+    setLoading(false);
+  };
+
+  const handleInputKeyDown = (e) => {
+    if (e.key === 'Enter') handleSend();
+  };
 
   const handleViewMemory = async () => {
     setMemoryLoading(true);
@@ -27,34 +103,12 @@ function App() {
       });
       const data = await res.json();
       setMemoryView(data.user_context || 'No memory found.');
-    } catch (err) {
+    } catch {
       setMemoryView('Error fetching memory.');
     }
     setMemoryLoading(false);
   };
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
-    const userMsg = { sender: 'user', text: input };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    setLoading(true);
-    try {
-      // Send input to backend agent (FastAPI)
-      const res = await fetch('http://localhost:8000/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: input })
-      });
-      const data = await res.json();
-      setMessages(prev => [...prev, { sender: 'agent', text: data.response ? `${agentName}: ${data.response}` : `${agentName}: ...` }]);
-    } catch (err) {
-      setMessages(prev => [...prev, { sender: 'agent', text: 'Error connecting to agent backend.' }]);
-    }
-    setLoading(false);
-  };
-
-  // Facebook Data Upload
   const handleFbFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -66,13 +120,40 @@ function App() {
         method: 'POST',
         body: formData
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (res.ok && data) {
+        // Expect backend to return: {success, posts_stored, private_count, public_count, public_candidates}
         setFbUploadStatus('Upload successful! Abigail will now learn from your Facebook history.');
+        setFbUploadSummary({
+          private: data.private_count || 0,
+          public: data.public_count || 0,
+          publicCandidates: data.public_candidates || []
+        });
       } else {
         setFbUploadStatus('Upload failed. Please check your file and try again.');
+        setFbUploadSummary(null);
       }
-    } catch (err) {
+    } catch {
       setFbUploadStatus('Error uploading file.');
+      setFbUploadSummary(null);
+    }
+    setFbPublicApprove(false);
+  };
+
+  // Handler for approving public/global learning
+  const handleApprovePublicLearning = async () => {
+    if (!fbUploadSummary?.publicCandidates?.length) return;
+    setFbUploadStatus('Submitting scrubbed posts for public learning...');
+    try {
+      const res = await fetch('http://localhost:8000/import-facebook-public', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'default', posts: fbUploadSummary.publicCandidates })
+      });
+      setFbUploadStatus(res.ok ? 'Scrubbed posts contributed to public/global learning!' : 'Failed to submit for public learning.');
+      setFbPublicApprove(true);
+    } catch {
+      setFbUploadStatus('Error submitting for public learning.');
     }
   };
 
@@ -91,23 +172,29 @@ function App() {
       <main className="main-panel">
         {activeTab === 'chat' && (
           <section className="chat-panel">
-            <div className="messages">
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`msg ${msg.sender}`}>
-                  <span>{msg.text}</span>
-                </div>
-              ))}
-              {loading && <div className="msg agent"><span>{agentName}: ...</span></div>}
+            <div className="messages-container">
+              <div className="messages-list">
+                {messages.map((msg, idx) => (
+                  <div key={idx} className={`msg ${msg.sender}`}>
+                    <span>{msg.text}</span>
+                  </div>
+                ))}
+                {loading && <div className="msg agent"><span>{agentName}: ...</span></div>}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
-            <div className="chat-input">
+            <div className="chat-input-bar">
               <input
                 type="text"
                 value={input}
                 onChange={e => setInput(e.target.value)}
+                onKeyDown={handleInputKeyDown}
                 placeholder="Type your message..."
                 disabled={loading}
+                aria-label="Message input"
+                autoFocus
               />
-              <button onClick={handleSend} disabled={loading}>Send</button>
+              <button onClick={handleSend} disabled={loading || !input.trim()}>Send</button>
             </div>
           </section>
         )}
@@ -121,6 +208,23 @@ function App() {
             </ol>
             <input type="file" accept=".json,.zip" onChange={handleFbFileUpload} />
             {fbUploadStatus && <p className="fb-status">{fbUploadStatus}</p>}
+            {fbUploadSummary && (
+              <div className="fb-summary">
+                <p>
+                  <b>Privacy Analysis:</b><br />
+                  {fbUploadSummary.private} posts detected as <span style={{color:'red'}}>private</span>.<br />
+                  {fbUploadSummary.public} posts can be scrubbed and contributed to <span style={{color:'green'}}>public/global learning</span>.<br />
+                </p>
+                {!fbPublicApprove && fbUploadSummary.public > 0 && (
+                  <button onClick={handleApprovePublicLearning} style={{marginTop:'1em'}}>
+                    Yes, contribute scrubbed posts to public/global learning
+                  </button>
+                )}
+                {fbPublicApprove && (
+                  <p style={{color:'green'}}>Thank you for contributing to public/global learning!</p>
+                )}
+              </div>
+            )}
             <p className="fb-privacy">Your data is processed locally and never shared without your consent.</p>
           </section>
         )}
@@ -136,7 +240,7 @@ function App() {
             <button onClick={handleViewMemory} disabled={memoryLoading} style={{marginBottom: '1em'}}>
               {memoryLoading ? 'Loading...' : 'Refresh Memory'}
             </button>
-            <pre className="memory-view" style={{background:'#f9f9f9',padding:'1em',borderRadius:'6px',maxHeight:'400px',overflow:'auto'}}>
+            <pre className="memory-view">
               {memoryView}
             </pre>
             <p className="memory-privacy">This is what Abigail has learned and stored in her memory. Only you can view this.</p>

@@ -3,63 +3,76 @@
 Exposes endpoints for user personality traits, mood, and context. Ready for P2P/libp2p integration.
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from pydantic import BaseModel
 import uvicorn
-import json
+ # removed unused import 'json'
 import os
+from agi_api_client import AGIAPIClient
 
 app = FastAPI()
-personality_data = {}
+# Centralized API client configuration
+MEMORY_URL = os.getenv("MEMORY_SERVER_URL", "http://localhost:8002")
+PERSONALITY_URL = os.getenv("PERSONALITY_SERVER_URL", "http://localhost:8002")
+GLOBAL_URL = os.getenv("GLOBAL_SERVER_URL", "http://localhost:8003")
+agi_client = AGIAPIClient(MEMORY_URL, PERSONALITY_URL, GLOBAL_URL)
+
+
+class AddObservationRequest(BaseModel):
+    user_id: str
+    observation: str
 
 @app.post("/add-observation")
-async def add_observation(request: Request):
+def add_observation(body: AddObservationRequest):
     """
     Add an interaction as an observation node for a user (for MCP memory graph integration).
     """
-    data = await request.json()
-    user_id = data.get("user_id")
-    observation = data.get("observation")
+    user_id = body.user_id
+    observation = body.observation
     if not user_id or not observation:
         return {"success": False, "error": "Missing user_id or observation"}
-    # Store observation in personality_data (extend for MCP graph integration)
-    if user_id not in personality_data:
-        personality_data[user_id] = {}
-    if "observations" not in personality_data[user_id]:
-        personality_data[user_id]["observations"] = []
-    personality_data[user_id]["observations"].append(observation)
-    return {"success": True}
+    resp = agi_client.add_observation(user_id, observation)
+    return resp
+
+
+class SetPersonalityRequest(BaseModel):
+    user_id: str
+    traits: dict = {}
+    mood_vector: dict = {}
+    archetype: str = "guardian"
 
 @app.post("/set-personality")
-async def set_personality(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
-    traits = data.get("traits", {})
-    mood_vector = data.get("mood_vector", {})
-    archetype = data.get("archetype", "guardian")
-    if user_id:
-        personality_data[user_id] = {
-            "traits": traits,
-            "mood_vector": mood_vector,
-            "archetype": archetype
-        }
-        return {"success": True}
-    return {"success": False, "error": "Missing user_id"}
+def set_personality(body: SetPersonalityRequest):
+    user_id = body.user_id
+    traits = body.traits
+    mood_vector = body.mood_vector
+    archetype = body.archetype
+    if not user_id:
+        return {"success": False, "error": "Missing user_id"}
+    resp = agi_client.set_personality(user_id, traits, mood_vector, archetype)
+    return resp
+
+
+class GetPersonalityRequest(BaseModel):
+    user_id: str
 
 @app.post("/get-personality")
-async def get_personality(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
-    result = personality_data.get(user_id, {})
-    return result
+def get_personality(body: GetPersonalityRequest):
+    user_id = body.user_id
+    resp = agi_client.get_personality(user_id)
+    return resp
+
+
+class GetPersonalityContextRequest(BaseModel):
+    user_id: str
 
 @app.post("/get-personality-context")
-async def get_personality_context(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
-    p = personality_data.get(user_id, {})
-    context = f"Archetype: {p.get('archetype', '')}\n"
-    context += "Mood Vector: " + ", ".join(f"{k}: {v}" for k, v in p.get("mood_vector", {}).items()) + "\n"
-    context += "Traits: " + ", ".join(f"{k}: {v}" for k, v in p.get("traits", {}).items()) + "\n"
+def get_personality_context(body: GetPersonalityContextRequest):
+    user_id = body.user_id
+    resp = agi_client.get_personality(user_id)
+    context = f"Archetype: {resp.get('archetype', '')}\n"
+    context += "Traits: " + ", ".join(f"{k}: {v}" for k, v in resp.get("traits", {}).items()) + "\n"
+    context += "Mood Vector: " + ", ".join(f"{k}: {v}" for k, v in resp.get("mood_vector", {}).items()) + "\n"
     return {"context": context}
 
 if __name__ == "__main__":

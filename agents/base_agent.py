@@ -1,9 +1,3 @@
-
-"""
-[Memory]: This module orchestrates agent context, memory, and personality for AGI responses.
-Base Agent class for AGI system.
-Handles conversational AI using GPT-2 and FLAN.
-"""
 # --- Workflow Testing & Documentation ---
 # 1. Validate user interaction, learning, audit, and evolution workflows
 # 2. Document all new endpoints and UI controls in README/NewReadme.md
@@ -19,7 +13,7 @@ try:
 except ImportError:
     pipeline = None
 
-import wikipedia
+import wikipediaapi
 import time
 import threading
 import hashlib
@@ -43,12 +37,30 @@ def query_wikidata(entity: str, limit: int = 3):
         return {"error": str(e)}
 
 def query_wikipedia(topic: str, sentences: int = 2):
-    """Query Wikipedia for a summary about a topic."""
-    try:
-        summary = wikipedia.summary(topic, sentences=sentences, auto_suggest=True)
-        return {"summary": summary}
-    except Exception as e:
-        return {"error": str(e)}
+    """Query Wikipedia for a detailed summary, sections, and links about a topic using wikipedia-api."""
+    wiki = wikipediaapi.Wikipedia('en')
+    page = wiki.page(topic)
+    if not page.exists():
+        return {"error": f"No Wikipedia page found for '{topic}'"}
+    # Get summary
+    summary = page.summary
+    # Get sections
+    sections = {}
+    def extract_sections(sections_list):
+        for s in sections_list:
+            sections[s.title] = s.text[:500]  # Truncate for brevity
+            extract_sections(s.sections)
+    extract_sections(page.sections)
+    # Get links
+    links = list(page.links.keys())[:10]
+    # Get categories
+    categories = list(page.categories.keys())
+    return {
+        "summary": summary,
+        "sections": sections,
+        "links": links,
+        "categories": categories
+    }
 
 def query_openfda_drug_event(term: str, limit: int = 5, api_key: Optional[str] = None):
     """
@@ -71,29 +83,69 @@ def query_openfda_drug_event(term: str, limit: int = 5, api_key: Optional[str] =
 
 
 class BaseAgent:
-    def __init__(self, model_name="gpt2", use_http=True, available_models=None):
+    def _init_lightweight_models(self):
+        """
+        Initialize lightweight transformer models for local inference.
+        Prioritize small, fast models for laptop use.
+        """
+        self.available_models = ["distilgpt2", "flan-t5-small"]
+        self.model_pipelines = {}
+        if pipeline is not None:
+            for m in self.available_models:
+                try:
+                    if m.startswith("flan-t5"):
+                        self.model_pipelines[m] = pipeline("text2text-generation", model=m)
+                    else:
+                        self.model_pipelines[m] = pipeline("text-generation", model=m)
+                except Exception:
+                    self.model_pipelines[m] = None
+    """
+    [Memory]: This module orchestrates agent context, memory, and personality for AGI responses.
+    Base Agent class for AGI system.
+    Handles conversational AI using GPT-2 and FLAN.
+    """
+    def fetch_external_facts(self, query):
+        """Aggregate facts from Wikidata, Wikipedia, news, weather, books, movies, and openFDA if relevant."""
+        facts = {
+            "wikidata": self.fetch_wikidata(query),
+            "wikipedia": self.fetch_wikipedia(query),
+            "news": self.fetch_news(query),
+            "weather": self.fetch_weather(query),
+            "books": self.fetch_books(query),
+            "movies": self.fetch_movies(query)
+        }
+        medical_keywords = ["medication", "drug", "medicine", "side effect", "sickness", "illness", "prescription", "adverse event", "symptom"]
+        if any(word in query.lower() for word in medical_keywords):
+            facts["openfda_drug_event"] = self.fetch_openfda(query)
+        return facts
+
+    def _cache_key(self, prefix, query):
+        """Generate a cache key for knowledge cache."""
+        return f"{prefix}:{hashlib.sha256(str(query).encode()).hexdigest()}"
+
+    def __init__(self, model_name="distilgpt2", use_http=True, available_models=None):
         """
         Initialize BaseAgent with model ensemble and context/threading scaffolding.
         """
         self.model_name = model_name
         self.use_http = use_http
-        self.available_models = available_models or ["gpt2", "flan-t5-base"]
         self.model_pipelines = {}
-        if pipeline is not None:
-            for m in self.available_models:
-                try:
-                    self.model_pipelines[m] = pipeline("text-generation", model=m)
-                except Exception:
-                    self.model_pipelines[m] = None
-        # Placeholder for memory and personality modules
-        self.memory = None  # Legacy single memory (deprecated)
+        self._init_lightweight_models()
+        # Production-ready memory and personality modules
+        try:
+            from personality.personality import Personality
+            from memory.memory_api import MemoryAPI
+            self.memory = MemoryAPI()  # Integrated with persistent memory API
+            self.personality = Personality(user_id="default")
+        except Exception:
+            self.memory = None
+            self.personality = None
+        # Always initialize legacy/compatibility attributes
         self.local_memory = {}  # Per-user, private
         self.global_knowledge = {}  # Shared, de-identified
-        self.personality = None
-        # External knowledge cache
         self.knowledge_cache = {}
         self.cache_expiry = 600  # seconds
-        # Conversational threading
+        self.audit_log = []
         self.topic_stack = []
         self.thread_context = {}
         # Autonomous learning loop
@@ -248,31 +300,71 @@ class BaseAgent:
     # 4. Document scaling steps in README (see NewReadme.md)
     # --- Personality Engine: Semantic Memory Graph & Archetype Evolution ---
     def query_semantic_memory_graph(self, user_id, query=None):
-        """Query semantic memory graph for user insights, relationships, or context."""
-        # Placeholder: integrate with memory server or MCP API
-        # Example: return recent glyphs, emotional arcs, or topic links
-        # In real use, this would call a REST/gRPC endpoint
-        return self.local_memory.get(user_id, {})
+        """
+        Query semantic memory graph for user insights, relationships, or context.
+        Calls the memory server REST API endpoint /graph/query.
+        Falls back to local memory if unreachable.
+        """
+        mem_server_url = os.getenv("MEMORY_SERVER_URL", "http://localhost:8000")
+        endpoint = f"{mem_server_url}/graph/query"
+        payload = {"user_id": user_id, "query": query}
+        try:
+            import requests
+            resp = requests.post(endpoint, json=payload, timeout=5)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            # Log error and fallback
+            self.audit_log.append({"action": "memory_graph_query_error", "user_id": user_id, "error": str(e), "ts": time.time()})
+            return self.local_memory.get(user_id, {})
 
     def update_semantic_memory_graph(self, user_id, observation):
-        """Update semantic memory graph with new observation/glyph."""
-        # Placeholder: integrate with memory server or MCP API
-        # Example: add new glyph, update emotional arc, link topics
-        if user_id not in self.local_memory:
-            self.local_memory[user_id] = {}
-        self.local_memory[user_id][f"glyph_{int(time.time())}"] = observation
-        self.audit_log.append({"action": "update_semantic_graph", "user_id": user_id, "observation": observation, "ts": time.time()})
+        """
+        Update semantic memory graph with new observation/glyph.
+        Calls the memory server REST API endpoint /graph/update.
+        Falls back to local memory if unreachable.
+        """
+        mem_server_url = os.getenv("MEMORY_SERVER_URL", "http://localhost:8000")
+        endpoint = f"{mem_server_url}/graph/update"
+        payload = {"user_id": user_id, "observation": observation}
+        try:
+            import requests
+            resp = requests.post(endpoint, json=payload, timeout=5)
+            resp.raise_for_status()
+            self.audit_log.append({"action": "update_semantic_graph", "user_id": user_id, "observation": observation, "ts": time.time()})
+            return resp.json()
+        except Exception as e:
+            # Log error and fallback
+            self.audit_log.append({"action": "memory_graph_update_error", "user_id": user_id, "error": str(e), "ts": time.time()})
+            if user_id not in self.local_memory:
+                self.local_memory[user_id] = {}
+            self.local_memory[user_id][f"glyph_{int(time.time())}"] = observation
+            self.audit_log.append({"action": "update_semantic_graph", "user_id": user_id, "observation": observation, "ts": time.time()})
+            return {"status": "local_fallback", "observation": observation}
     def _extract_text_blobs(self, facts):
         """Helper to extract all text from facts dict."""
-        text_blobs = []
-        for v in facts.values():
-            if isinstance(v, dict):
-                text_blobs.extend([str(val) for val in v.values() if isinstance(val, str)])
-            elif isinstance(v, list):
-                text_blobs.extend([str(item) for item in v if isinstance(item, str)])
-            elif isinstance(v, str):
-                text_blobs.append(v)
-        return text_blobs
+        def handle_dict(d):
+            blobs = []
+            for key, value in d.items():
+                blobs.extend(handle_value(value))
+            return blobs
+
+        def handle_list(l):
+            blobs = []
+            for item in l:
+                blobs.extend(handle_value(item))
+            return blobs
+
+        def handle_value(val):
+            if isinstance(val, str):
+                return [val.strip()] if val.strip() else []
+            elif isinstance(val, dict):
+                return handle_dict(val)
+            elif isinstance(val, list):
+                return handle_list(val)
+            return []
+
+        return handle_value(facts)
 
     def _map_sentiment_to_emotions(self, results):
         """Helper to map sentiment results to emotions."""
@@ -293,11 +385,20 @@ class BaseAgent:
         return emotions
 
     def evolve_archetype(self, user_id, archetype_update):
-        """Evolve user's archetype/personality based on new insights."""
-        # Placeholder: update personality archetype
+        """
+        Evolve user's archetype/personality based on new insights.
+        Persists update, logs change, and triggers downstream effects.
+        """
         if self.personality:
             self.personality.archetype = archetype_update
+            # Persist archetype to local memory
+            if user_id not in self.local_memory:
+                self.local_memory[user_id] = {}
+            self.local_memory[user_id]["archetype"] = archetype_update
+            # Log change for audit and explainability
             self.audit_log.append({"action": "archetype_evolve", "user_id": user_id, "archetype": archetype_update, "ts": time.time()})
+            # Trigger downstream effects (e.g., mood recalculation)
+            self.personality.recalculate_mood()
 
     # --- Privacy/Audit Controls for UI/User ---
     def get_audit_log(self, user_id=None, limit=50):
@@ -308,7 +409,12 @@ class BaseAgent:
         return logs[-limit:]
 
     def get_memory_snapshot(self, user_id):
-        """Expose current memory snapshot for UI/user control."""
+        """Expose current memory snapshot for UI/user control, using MemoryAPI if available."""
+        if self.memory is not None:
+            try:
+                return self.memory.get(user_id)
+            except Exception as e:
+                self.audit_log.append({"action": "memory_api_error", "user_id": user_id, "error": str(e), "ts": time.time()})
         return self.local_memory.get(user_id, {})
 
     def prune_memory_key(self, user_id, key):
@@ -372,30 +478,51 @@ class BaseAgent:
 
     def distill_insights(self, facts):
         """Distill key insights from facts using summarization and basic de-biasing."""
-        # Collect all text from facts
+        text_blobs = self._collect_text_blobs(facts)
+        full_text = " ".join(text_blobs)
+        summary = self._summarize_text(full_text)
+        if summary is not None:
+            return {"summary": self._debias_summary(summary)}
+        return facts
+
+    def _collect_text_blobs(self, facts):
+        """Helper to collect all text from facts."""
+        def extract_text(val):
+            if isinstance(val, str):
+                return [val]
+            elif isinstance(val, dict):
+                blobs = []
+                for v in val.values():
+                    blobs.extend(extract_text(v))
+                return blobs
+            elif isinstance(val, list):
+                blobs = []
+                for item in val:
+                    blobs.extend(extract_text(item))
+                return blobs
+            return []
         text_blobs = []
         for v in facts.values():
-            if isinstance(v, dict):
-                text_blobs.extend([str(val) for val in v.values() if isinstance(val, str)])
-            elif isinstance(v, list):
-                text_blobs.extend([str(item) for item in v if isinstance(item, str)])
-            elif isinstance(v, str):
-                text_blobs.append(v)
-        full_text = " ".join(text_blobs)
-        # Use transformers summarization pipeline if available
+            text_blobs.extend(extract_text(v))
+        return text_blobs
+
+    def _summarize_text(self, full_text):
+        """Helper to summarize text using transformers pipeline."""
         if pipeline is not None:
             try:
                 from transformers.pipelines import pipeline as hf_pipeline  # type: ignore
                 summarizer = hf_pipeline("summarization", model="facebook/bart-large-cnn")  # type: ignore
                 summary = summarizer(full_text[:1024], max_length=80, min_length=20, do_sample=False)
-                insight = summary[0].get("summary_text", "")
-                for phrase in ["in my opinion", "it is believed", "some say", "many think"]:
-                    insight = insight.replace(phrase, "")
-                return {"summary": insight.strip()}
+                return summary[0].get("summary_text", "")
             except Exception:
                 pass
-        # Fallback: return original facts
-        return facts
+        return None
+
+    def _debias_summary(self, insight):
+        """Helper to remove common bias phrases from summary."""
+        for phrase in ["in my opinion", "it is believed", "some say", "many think"]:
+            insight = insight.replace(phrase, "")
+        return insight.strip()
 
     def store_global_learning(self, topic, insights, emotional_tone):
         """Store de-identified insights in global knowledge graph."""
@@ -420,7 +547,15 @@ class BaseAgent:
         return [log for log in self.audit_log if log.get("user_id") == user_id]
 
     def store_local_memory(self, user_id, data):
-        """Store/update local memory for a user."""
+        """Store/update user memory using MemoryAPI if available, else fallback to local."""
+        if self.memory is not None:
+            try:
+                self.memory.store(user_id, data)
+                self.audit_log.append({"action": "store_memory_api", "user_id": user_id, "data": data, "ts": time.time()})
+                return
+            except Exception as e:
+                self.audit_log.append({"action": "memory_api_error", "user_id": user_id, "error": str(e), "ts": time.time()})
+        # Fallback to local memory
         if user_id not in self.local_memory:
             self.local_memory[user_id] = {}
         self.local_memory[user_id].update(data)
@@ -428,13 +563,21 @@ class BaseAgent:
 
     def aggregate_global_insight(self, insight, emotional_tag):
         """Aggregate de-identified user insight into global knowledge."""
-        # Differential privacy stub: strip identifiers
+        # Differential privacy: anonymize and add noise to user insight before aggregation
+        import hashlib, random
+        anonymized_id = hashlib.sha256(insight.encode()).hexdigest()[:16]
+        # Add random noise to emotional_tag for privacy
+        noisy_tag = emotional_tag.copy() if isinstance(emotional_tag, dict) else emotional_tag
+        if isinstance(noisy_tag, dict):
+            for k in noisy_tag:
+                noise = random.uniform(-0.05, 0.05)
+                noisy_tag[k] = round(max(0.0, min(1.0, noisy_tag[k] + noise)), 2)
         self.global_knowledge.setdefault("user_insights", []).append({
-            "insight": insight,
-            "emotional_tag": emotional_tag,
+            "anonymized_id": anonymized_id,
+            "emotional_tag": noisy_tag,
             "ts": time.time()
         })
-        self.audit_log.append({"action": "aggregate_global", "insight": insight, "emotional_tag": emotional_tag, "ts": time.time()})
+        self.audit_log.append({"action": "aggregate_global", "anonymized_id": anonymized_id, "emotional_tag": noisy_tag, "ts": time.time()})
 
     # Personality engine expansion
     def update_personality_traits(self, traits):
@@ -451,56 +594,45 @@ class BaseAgent:
 
     # Semantic fusion reply logic
     def synthesize_reply(self, context):
-        """Synthesize reply from memory + facts + personality."""
+        """Synthesize reply from memory, external API facts, FLAN, and local transformer output."""
         reply = []
         traits = context.get("traits", {})
         mood = context.get("mood", {})
-        memory = context.get("memory", {})
+        memory = context.get("memory", [])
         facts = context.get("facts", {})
+        query = context.get("query", "")
+        # 1. Memory: surface top relevant snippets
+        if memory:
+            reply.append("Relevant Memory:")
+            for i, mem in enumerate(memory):
+                reply.append(f"  {i+1}. {mem}")
+        # 2. External API facts
+        if facts:
+            reply.append("External Facts:")
+            for k, v in facts.items():
+                reply.append(f"  {k}: {v}")
+        # 3. FLAN and local transformer output
+        flan_reply = None
+        gpt_reply = None
+        if "flan-t5-small" in self.model_pipelines:
+            try:
+                flan_reply = self.model_pipelines["flan-t5-small"](query, max_length=60)[0]["generated_text"]
+                reply.append(f"FLAN-T5: {flan_reply}")
+            except Exception:
+                pass
+        if "distilgpt2" in self.model_pipelines:
+            try:
+                gpt_reply = self.model_pipelines["distilgpt2"](query, max_length=60, num_return_sequences=1)[0]["generated_text"]
+                reply.append(f"DistilGPT2: {gpt_reply}")
+            except Exception:
+                pass
+        # 4. Traits and mood
         if traits:
             reply.append(f"Traits: {traits}")
         if mood:
             reply.append(f"Mood: {mood}")
-        if memory:
-            reply.append(f"Memory: {memory}")
-        if facts:
-            reply.append(f"Facts: {facts}")
-        return " | ".join(reply)
-
-
-    def set_memory(self, memory):
-        self.memory = memory
-
-
-    def set_personality(self, personality):
-        self.personality = personality
-
-
-
-
-    def _cache_key(self, *args):
-        return hashlib.sha256("|".join(map(str, args)).encode()).hexdigest()
-
-    def fetch_external_facts(self, query):
-        """Fuse facts from multiple sources, with caching."""
-        cache_key = self._cache_key("external_facts", query)
-        now = time.time()
-        cached = self.knowledge_cache.get(cache_key)
-        if cached and now - cached["ts"] < self.cache_expiry:
-            return cached["facts"]
-        facts = {
-            "wikidata": self.fetch_wikidata(query),
-            "wikipedia": self.fetch_wikipedia(query),
-        }
-        medical_keywords = ["medication", "drug", "medicine", "side effect", "sickness", "illness", "prescription", "adverse event", "symptom"]
-        if any(word in query.lower() for word in medical_keywords):
-            facts["openfda_drug_event"] = self.fetch_openfda(query)
-        facts["news"] = self.fetch_news(query)
-        facts["weather"] = self.fetch_weather(query)
-        facts["books"] = self.fetch_books(query)
-        facts["movies"] = self.fetch_movies(query)
-        self.knowledge_cache[cache_key] = {"facts": facts, "ts": now}
-        return facts
+        # Compose a rich, multi-source reply
+        return "\n".join(reply) if reply else "I'm here to help!"
 
     def _weight_context(self, context):
         """
@@ -599,9 +731,13 @@ class BaseAgent:
         """
         # Store feedback in memory
         if self.memory is not None:
-            if user_id not in self.memory:
-                self.memory[user_id] = {}
-            self.memory[user_id]["feedback"] = self.memory[user_id].get("feedback", []) + [feedback]
+            try:
+                mem = self.memory.get(user_id)
+                feedback_list = mem.get("feedback", []) if isinstance(mem, dict) else []
+                feedback_list.append(feedback)
+                self.memory.store(user_id, {"feedback": feedback_list})
+            except Exception as e:
+                self.audit_log.append({"action": "memory_api_error", "user_id": user_id, "error": str(e), "ts": time.time()})
         # Optionally update personality
         if self.personality:
             self.personality.update_traits({"last_feedback": feedback})
@@ -646,49 +782,124 @@ class BaseAgent:
     def _fetch_external_knowledge(self, prompt):
         return self.fetch_external_facts(prompt)
 
-    def _fuse_context(self, traits, mood, local_mem, global_mem, facts, prompt):
+    def _retrieve_relevant_memory(self, user_id, query, top_k=5):
+        """
+        Retrieve the most relevant memory snippets (Facebook posts, journal, etc.) for the given query.
+        Uses keyword matching and, if available, embedding similarity.
+        Returns a list of relevant snippets.
+        """
+        memory = self.local_memory.get(user_id, {})
+        snippets = self._collect_memory_snippets(memory)
+        keyword_hits = self._keyword_match_snippets(snippets, query)
+        if len(keyword_hits) >= top_k:
+            return [v for k, v in keyword_hits[:top_k]]
+        embedding_hits = self._embedding_similarity_snippets(snippets, query, top_k)
+        if embedding_hits is not None:
+            return embedding_hits
+        return [v for k, v in snippets[:top_k]]
+
+    def _collect_memory_snippets(self, memory):
+        """Helper to collect all text-based memory items."""
+        snippets = []
+        for key, value in memory.items():
+            if isinstance(value, str):
+                snippets.append((key, value))
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        snippets.append((key, item))
+            elif isinstance(value, dict):
+                for v in value.values():
+                    if isinstance(v, str):
+                        snippets.append((key, v))
+        return snippets
+
+    def _keyword_match_snippets(self, snippets, query):
+        """Helper to perform keyword matching on snippets."""
+        query_lower = query.lower()
+        return [(k, v) for k, v in snippets if query_lower in v.lower() or query_lower in k.lower()]
+
+    def _embedding_similarity_snippets(self, snippets, query, top_k):
+        """Helper to score snippets by embedding similarity."""
+        try:
+            from transformers import AutoTokenizer, AutoModel
+            import torch
+            tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+            model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+            def embed(text):
+                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                    emb = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+                return emb
+            query_emb = embed(query)
+            scored = []
+            for k, v in snippets:
+                ctx_emb = embed(v)
+                sim = float(torch.nn.functional.cosine_similarity(torch.tensor(query_emb), torch.tensor(ctx_emb), dim=0))
+                scored.append((sim, v))
+            scored.sort(reverse=True)
+            return [v for sim, v in scored[:top_k]]
+        except Exception:
+            return None
+
+    def _fuse_context(self, traits, mood, local_mem, global_mem, facts, prompt, user_id=None):
+        """
+        Fuse context for the model, including only the most relevant memory snippets for the query.
+        """
+        relevant_memory = self._retrieve_relevant_memory(user_id, prompt, top_k=5) if user_id else []
         return {
             "traits": traits,
             "mood": mood,
-            "memory": local_mem,
+            "memory": relevant_memory,
             "facts": facts,
             "global": global_mem,
             "query": prompt
         }
 
     def _generate_response(self, context, selected_model):
+        import logging
         pipeline_obj = self.model_pipelines.get(selected_model)
-        response = self.synthesize_reply(context)
+        # Build prompt from fused context
+        prompt = self.build_prompt(context)
+        response = None
         if pipeline_obj:
-            full_prompt = self.build_prompt(context)
             try:
-                result = pipeline_obj(full_prompt, max_length=100, num_return_sequences=1)
-                response = result[0]["generated_text"]
-            except Exception:
-                pass
-        else:
-            try:
-                full_prompt = self.build_prompt(context)
-                hf_api_token = os.getenv("HF_API_TOKEN")
-                if hf_api_token:
-                    headers = {"Authorization": f"Bearer {hf_api_token}"}
-                    payload = {"inputs": full_prompt}
-                    hf_url = "https://api-inference.huggingface.co/models/gpt2"
-                    resp = requests.post(hf_url, headers=headers, json=payload, timeout=10)
-                    if resp.ok:
-                        response = resp.json()[0]["generated_text"]
-            except Exception:
-                pass
+                if selected_model.startswith("flan-t5"):
+                    result = pipeline_obj(prompt, max_length=80)
+                    response = result[0]["generated_text"] if "generated_text" in result[0] else result[0]["generated_text"]
+                else:
+                    result = pipeline_obj(prompt, max_length=80, num_return_sequences=1)
+                    response = result[0]["generated_text"]
+                logging.info(f"[BaseAgent] Model '{selected_model}' generated: {response}")
+            except Exception as e:
+                logging.error(f"[BaseAgent] Model pipeline error: {e}. Using fallback reply.")
+        if not response:
+            response = self.synthesize_reply(context)
+            logging.warning(f"[BaseAgent] Fallback reply used. Context: {context}")
         return response
 
     def _post_process_response(self, response, style, sentiment):
         return self.personalize_response(response, self.personality, style=style, sentiment=sentiment)
 
     def _learn_and_update(self, prompt, response, user_id):
-        if self.personality:
-            self.add_interaction_history({"prompt": prompt, "response": response})
+        """
+        Store each interaction (prompt, response, timestamp) in local memory for future improvement.
+        This enables personalization and learning, but keeps the model general.
+        """
         if user_id is not None:
-            self.store_local_memory(user_id, {"last_prompt": prompt, "last_response": response})
+            if user_id not in self.local_memory:
+                self.local_memory[user_id] = {}
+            history = self.local_memory[user_id].get("interaction_history", [])
+            history.append({
+                "prompt": prompt,
+                "response": response,
+                "timestamp": time.time()
+            })
+            # Keep only the last 100 interactions for efficiency
+            self.local_memory[user_id]["interaction_history"] = history[-100:]
+        if self.personality:
+            self.add_interaction_history({"prompt": prompt, "response": response, "timestamp": time.time()})
 
     def _update_topic_stack(self, prompt, response):
         self.topic_stack.append({"prompt": prompt, "response": response, "ts": time.time()})
