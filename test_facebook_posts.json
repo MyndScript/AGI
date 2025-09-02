@@ -1,0 +1,10 @@
+[
+  {
+    "type": "post",
+    "content": "This is a test Facebook post to verify the upload functionality works correctly."
+  },
+  {
+    "type": "post", 
+    "content": "Another test post with more content to make sure multiple posts can be uploaded and processed properly."
+  }
+]

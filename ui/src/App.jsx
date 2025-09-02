@@ -12,8 +12,13 @@ function App() {
   const [fbUploadStatus, setFbUploadStatus] = useState('');
   const [fbUploadSummary, setFbUploadSummary] = useState(null);
   const [fbPublicApprove, setFbPublicApprove] = useState(false);
-  const [memoryView, setMemoryView] = useState('');
+  const [journalEntry, setJournalEntry] = useState('');
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [aiOverview, setAiOverview] = useState('');
+  const [aiOverviewLoading, setAiOverviewLoading] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryView, setMemoryView] = useState('Click "Refresh Memory" to view Abigail\'s learned memory.');
   const messagesEndRef = useRef(null);
 
   // Scroll to bottom when messages update
@@ -23,7 +28,7 @@ function App() {
 
   // Automated agent decision logic for backend endpoint selection
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  if (!input.trim() || loading) return;
     const userMsg = { sender: 'user', text: input };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
@@ -38,7 +43,7 @@ function App() {
       if (/personality|traits|archetype|mood|context/i.test(input)) {
         endpoint = 'get-personality-context';
         payload = { user_id: 'default' };
-        const res = await fetch('http://localhost:8002/get-personality-context', {
+  const res = await fetch('http://localhost:8010/get-personality-context', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -48,26 +53,47 @@ function App() {
       } else if (/memory|remember|recall|learned/i.test(input)) {
         endpoint = 'abigail/memory';
         payload = { user_id: 'default' };
-        const res = await fetch('http://localhost:8000/abigail/memory', {
+  const res = await fetch('http://localhost:8010/abigail/memory', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         const data = await res.json();
         agentResponse = data.user_context || 'No memory found.';
-      } else if (/observe|observation|journal|note/i.test(input)) {
-        endpoint = 'add-observation';
-        payload = { user_id: 'default', observation: input };
-        const res = await fetch('http://localhost:8002/add-observation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        agentResponse = data.success ? 'Observation added.' : (data.error || 'Failed to add observation.');
+      } else if (/observe|observation|journal|note/i.test(input.trim())) {
+        // Only run observation logic if input is non-empty and trimmed
+        if (!input.trim()) {
+          agentResponse = 'Observation summary cannot be empty.';
+        } else {
+          endpoint = 'add-observation';
+          const now = Date.now();
+          // Generate a truly unique id using timestamp and random string
+          const uniqueId = `obs_${now}_${Math.random().toString(36).substr(2, 9)}`;
+          payload = {
+            moment: {
+              id: uniqueId,
+              user_id: 'default',
+              summary: input.trim(),
+              emotion: 'neutral', // Default to neutral if not analyzed
+              glyph: '📝',   // Default glyph for observation
+              tags: input.trim().split(' ').filter(w => w.length > 2), // crude tag extraction
+              timestamp: now,
+              embedding: '' // Optionally set
+            }
+          };
+          // Debug: print payload before sending
+          console.log('Sending observation payload:', payload);
+          const res = await fetch('http://localhost:8010/add-observation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          agentResponse = data.success ? 'Observation added.' : (data.error || 'Failed to add observation.');
+        }
       } else {
         // Default: use chat/generate endpoint
-        const res = await fetch('http://localhost:8000/generate', {
+  const res = await fetch('http://localhost:8010/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -96,7 +122,7 @@ function App() {
   const handleViewMemory = async () => {
     setMemoryLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/abigail/memory', {
+  const res = await fetch('http://localhost:8010/abigail/memory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: 'default' })
@@ -116,7 +142,7 @@ function App() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch('http://localhost:8000/import-facebook', {
+  const res = await fetch('http://localhost:8010/import-facebook', {
         method: 'POST',
         body: formData
       });
@@ -140,22 +166,103 @@ function App() {
     setFbPublicApprove(false);
   };
 
-  // Handler for approving public/global learning
-  const handleApprovePublicLearning = async () => {
-    if (!fbUploadSummary?.publicCandidates?.length) return;
-    setFbUploadStatus('Submitting scrubbed posts for public learning...');
+  const handleApprovePublicLearning = () => {
+    setFbPublicApprove(true);
+  };
+
+  const handleSaveJournalEntry = async () => {
+    if (!journalEntry.trim()) return;
+    
+    setJournalLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/import-facebook-public', {
+      const now = new Date();
+      const entryData = {
+        id: `journal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        content: journalEntry.trim(),
+        timestamp: now.toISOString(),
+        date: now.toLocaleDateString(),
+        time: now.toLocaleTimeString(),
+        user_id: 'default'
+      };
+
+      const res = await fetch('http://localhost:8010/add-journal-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'default', posts: fbUploadSummary.publicCandidates })
+        body: JSON.stringify(entryData)
       });
-      setFbUploadStatus(res.ok ? 'Scrubbed posts contributed to public/global learning!' : 'Failed to submit for public learning.');
-      setFbPublicApprove(true);
-    } catch {
-      setFbUploadStatus('Error submitting for public learning.');
+
+      if (res.ok) {
+        setJournalEntries(prev => [entryData, ...prev]);
+        setJournalEntry('');
+        setMessages(prev => [
+          ...prev,
+          { sender: 'agent', text: `${agentName}: Journal entry saved successfully! 📝` }
+        ]);
+      } else {
+        throw new Error('Failed to save journal entry');
+      }
+    } catch (error) {
+      setMessages(prev => [
+        ...prev,
+        { sender: 'agent', text: `${agentName}: Sorry, I couldn't save your journal entry. Please try again.` }
+      ]);
+    }
+    setJournalLoading(false);
+  };
+
+  const handleGetAiOverview = async () => {
+    if (!journalEntry.trim()) {
+      setAiOverview('Please write something in your journal first before requesting an AI overview.');
+      return;
+    }
+
+    setAiOverviewLoading(true);
+    setAiOverview('');
+    
+    try {
+      const res = await fetch('http://localhost:8010/analyze-journal-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_entry: journalEntry.trim(),
+          previous_entries: journalEntries.slice(0, 5), // Last 5 entries for context
+          user_id: 'default'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAiOverview(data.analysis || data.overview || 'Analysis complete! Your journal entry has been processed.');
+      } else {
+        throw new Error('Failed to analyze journal entry');
+      }
+    } catch (error) {
+      setAiOverview('I apologize, but I couldn\'t analyze your journal entry right now. Please try again later.');
+    }
+    setAiOverviewLoading(false);
+  };
+
+  const loadJournalEntries = async () => {
+    try {
+      const res = await fetch('http://localhost:8010/get-journal-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'default', limit: 10 })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setJournalEntries(data.entries || []);
+      }
+    } catch (error) {
+      console.error('Failed to load journal entries:', error);
     }
   };
+
+  // Load journal entries on component mount
+  useEffect(() => {
+    loadJournalEntries();
+  }, []);
 
   return (
     <div className="agi-ui">
@@ -230,8 +337,80 @@ function App() {
         )}
         {activeTab === 'journal' && (
           <section className="journal-panel">
-            <h2>Journal Entry (Coming Soon)</h2>
-            <p>You'll be able to add personal journal entries for Abigail to learn from.</p>
+            <div className="journal-header">
+              <h2>Personal Journal</h2>
+              <p>Write your thoughts and reflections. Abigail will learn from your entries to better understand you.</p>
+            </div>
+            
+            <div className="journal-composer">
+              <div className="journal-input-section">
+                <textarea
+                  value={journalEntry}
+                  onChange={(e) => setJournalEntry(e.target.value)}
+                  placeholder="What's on your mind today? Write your thoughts, feelings, experiences, or reflections..."
+                  className="journal-textarea"
+                  rows="8"
+                  disabled={journalLoading}
+                />
+                <div className="journal-actions">
+                  <button 
+                    onClick={handleSaveJournalEntry} 
+                    disabled={journalLoading || !journalEntry.trim()}
+                    className="save-journal-btn"
+                  >
+                    {journalLoading ? 'Saving...' : '💾 Save Entry'}
+                  </button>
+                  <button 
+                    onClick={handleGetAiOverview} 
+                    disabled={aiOverviewLoading || !journalEntry.trim()}
+                    className="ai-overview-btn"
+                  >
+                    {aiOverviewLoading ? 'Analyzing...' : '🤖 AI Overview'}
+                  </button>
+                </div>
+              </div>
+              
+              {aiOverview && (
+                <div className="ai-overview-section">
+                  <h3>AI Analysis & Insights</h3>
+                  <div className="ai-overview-content">
+                    {aiOverview}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="journal-entries">
+              <h3>Recent Entries ({journalEntries.length})</h3>
+              {journalEntries.length === 0 ? (
+                <p className="no-entries">No journal entries yet. Start writing to see your entries here!</p>
+              ) : (
+                <div className="entries-list">
+                  {journalEntries.map((entry) => (
+                    <div key={entry.id} className="journal-entry-card">
+                      <div className="entry-header">
+                        <span className="entry-date">{entry.date}</span>
+                        <span className="entry-time">{entry.time}</span>
+                      </div>
+                      <div className="entry-content">
+                        {entry.content.length > 200 
+                          ? `${entry.content.substring(0, 200)}...` 
+                          : entry.content
+                        }
+                      </div>
+                      <div className="entry-actions">
+                        <button 
+                          onClick={() => setJournalEntry(entry.content)}
+                          className="edit-entry-btn"
+                        >
+                          ✏️ Edit
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
         {activeTab === 'memory' && (

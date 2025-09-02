@@ -1,386 +1,550 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Request
-import psycopg2
-import os
-import hmac
-import hashlib
-import base64
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
-from pydantic import BaseModel
-from typing import List, Optional
+"""
+AGI Memory API Client
+Handles sophisticated conversation analysis and personality scoring
+"""
 
-class MemoryAPI:
-    def __init__(self, sqlite_path='user_memory.db', pg_url=None):
-        import sqlite3
-        self.sqlite_path = sqlite_path
-        self.sqlite_conn = sqlite3.connect(sqlite_path, check_same_thread=False)
-        self.sqlite_conn.execute("CREATE TABLE IF NOT EXISTS user_memory (user_id TEXT, key TEXT, value TEXT, PRIMARY KEY (user_id, key))")
-        self.sqlite_conn.execute("""
-            CREATE TABLE IF NOT EXISTS moments (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                summary TEXT,
-                emotion TEXT,
-                glyph TEXT,
-                tags TEXT,
-                timestamp BIGINT,
-                embedding TEXT
-            )
-        """)
-        self.pg_url = pg_url or os.getenv("POSTGRES_URL", "dbname=agi user=postgres password=postgres host=localhost")
-        self.pg_conn = psycopg2.connect(self.pg_url)
-        with self.pg_conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS global_knowledge (
-                    id SERIAL PRIMARY KEY,
-                    topic TEXT,
-                    insights TEXT,
-                    emotional_tone TEXT,
-                    ts BIGINT
-                )
-            """)
-            self.pg_conn.commit()
+import httpx
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+import re
+from collections import defaultdict
 
-    def store_local(self, user_id, data):
-        for key, value in data.items():
-            self.sqlite_conn.execute("INSERT INTO user_memory (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value=excluded.value", (user_id, key, value))
-        self.sqlite_conn.commit()
+class ConversationAnalyzer:
+    """Advanced conversation analysis for personality insights"""
 
-    def get_local(self, user_id):
-        result = self.sqlite_conn.execute("SELECT key, value FROM user_memory WHERE user_id = ?", (user_id,)).fetchall()
-        return {k: v for k, v in result}
+    def __init__(self):
+        # Personality dimensions based on Big Five + additional traits
+        self.personality_dimensions = {
+            'openness': ['curious', 'imaginative', 'creative', 'open-minded', 'adventurous'],
+            'conscientiousness': ['organized', 'responsible', 'reliable', 'disciplined', 'thorough'],
+            'extraversion': ['outgoing', 'energetic', 'talkative', 'social', 'enthusiastic'],
+            'agreeableness': ['kind', 'cooperative', 'empathetic', 'helpful', 'considerate'],
+            'neuroticism': ['anxious', 'sensitive', 'emotional', 'worried', 'tense'],
+            'intellect': ['analytical', 'logical', 'thoughtful', 'reflective', 'philosophical'],
+            'creativity': ['innovative', 'artistic', 'original', 'visionary', 'inspired'],
+            'empathy': ['understanding', 'compassionate', 'supportive', 'caring', 'attuned']
+        }
 
-    def store(self, user_id, data, global_scope=False, emotional_tone=None, ts=None):
-        """
-        Robust unified store method.
-        - If global_scope is True or key is 'global', store in Postgres (global_knowledge).
-        - Otherwise, store in SQLite (user_memory).
-        - Prevents data mixing, logs all actions, and ensures atomicity.
-        """
-        import logging
-        if not isinstance(data, dict):
-            raise ValueError("Data must be a dictionary of key-value pairs.")
-        try:
-            if global_scope:
-                # Only allow string keys for global knowledge
-                for key, value in data.items():
-                    if not isinstance(key, str):
-                        raise TypeError(f"Global knowledge key must be str, got {type(key)}")
-                    with self.pg_conn:
-                        with self.pg_conn.cursor() as cur:
-                            cur.execute(
-                                "INSERT INTO global_knowledge (topic, insights, emotional_tone, ts) VALUES (%s, %s, %s, %s)",
-                                (key, value, emotional_tone or '', ts or 0)
-                            )
-                    logging.info(f"Stored global knowledge: {key}")
+        # Emotional patterns
+        self.emotion_patterns = {
+            'joy': ['happy', 'excited', 'delighted', 'thrilled', 'wonderful', 'amazing'],
+            'sadness': ['sad', 'depressed', 'unhappy', 'disappointed', 'heartbroken', 'miserable'],
+            'anger': ['angry', 'frustrated', 'irritated', 'furious', 'annoyed', 'outraged'],
+            'fear': ['scared', 'afraid', 'anxious', 'worried', 'nervous', 'terrified'],
+            'surprise': ['shocked', 'amazed', 'astonished', 'unexpected', 'surprising'],
+            'trust': ['confident', 'reliable', 'faithful', 'loyal', 'dependable'],
+            'anticipation': ['excited', 'eager', 'hopeful', 'optimistic', 'enthusiastic']
+        }
+
+        # Communication styles
+        self.communication_styles = {
+            'direct': ['clearly', 'directly', 'straightforward', 'honestly', 'bluntly'],
+            'diplomatic': ['carefully', 'tactfully', 'politely', 'respectfully', 'considerately'],
+            'analytical': ['logically', 'rationally', 'objectively', 'systematically', 'methodically'],
+            'emotional': ['feelingly', 'passionately', 'emotionally', 'intensely', 'deeply'],
+            'narrative': ['story', 'experience', 'journey', 'tale', 'adventure']
+        }
+
+    def analyze_conversation(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """Comprehensive conversation analysis for personality insights"""
+
+        if not conversation_history:
+            return self._default_personality_profile()
+
+        # Extract text content
+        user_messages = [msg for msg in conversation_history if msg.get('sender') == 'user']
+        assistant_messages = [msg for msg in conversation_history if msg.get('sender') == 'assistant']
+
+        user_text = ' '.join([msg.get('text', '') for msg in user_messages])
+        assistant_text = ' '.join([msg.get('text', '') for msg in assistant_messages])
+
+        # Analyze personality traits
+        personality_scores = self._analyze_personality_traits(user_text)
+
+        # Analyze emotional patterns
+        emotional_profile = self._analyze_emotional_patterns(user_text)
+
+        # Analyze communication style
+        communication_style = self._analyze_communication_style(user_text)
+
+        # Analyze cognitive patterns
+        cognitive_patterns = self._analyze_cognitive_patterns(user_text)
+
+        # Analyze temporal patterns
+        temporal_patterns = self._analyze_temporal_patterns(conversation_history)
+
+        # Calculate engagement metrics
+        engagement_metrics = self._calculate_engagement_metrics(conversation_history)
+
+        return {
+            'personality_scores': personality_scores,
+            'emotional_profile': emotional_profile,
+            'communication_style': communication_style,
+            'cognitive_patterns': cognitive_patterns,
+            'temporal_patterns': temporal_patterns,
+            'engagement_metrics': engagement_metrics,
+            'analysis_timestamp': datetime.now().isoformat(),
+            'conversation_count': len(conversation_history),
+            'user_message_count': len(user_messages),
+            'assistant_message_count': len(assistant_messages)
+        }
+
+    def _analyze_personality_traits(self, text: str) -> Dict[str, float]:
+        """Analyze Big Five personality traits + additional dimensions"""
+        text_lower = text.lower()
+        scores = {}
+
+        for trait, keywords in self.personality_dimensions.items():
+            # Count keyword matches
+            matches = sum(1 for keyword in keywords if keyword in text_lower)
+            # Normalize by text length (words per 1000 words)
+            word_count = len(text.split())
+            if word_count > 0:
+                scores[trait] = min(1.0, (matches / word_count) * 1000)
             else:
-                # Only allow string keys for local memory
-                for key in data.keys():
-                    if not isinstance(key, str):
-                        raise TypeError(f"Local memory key must be str, got {type(key)}")
-                self.store_local(user_id, data)
-                logging.info(f"Stored local memory for user {user_id}: {list(data.keys())}")
-        except Exception as e:
-            logging.error(f"MemoryAPI.store error: {e}")
-            raise
+                scores[trait] = 0.5  # Default neutral score
 
-    def get(self, user_id, key=None, global_scope=False):
-        """
-        Robust unified get method.
-        - If global_scope is True or key is 'global', get from Postgres (global_knowledge).
-        - Otherwise, get from SQLite (user_memory).
-        - Prevents data mixing, logs all actions, and validates types.
-        """
-        import logging
-        try:
-            if global_scope or (key == 'global'):
-                with self.pg_conn:
-                    with self.pg_conn.cursor() as cur:
-                        if key and key != 'global':
-                            if not isinstance(key, str):
-                                raise TypeError(f"Global knowledge key must be str, got {type(key)}")
-                            cur.execute("SELECT insights FROM global_knowledge WHERE topic = %s", (key,))
-                            result = cur.fetchone()
-                            logging.info(f"Fetched global knowledge for topic: {key}")
-                            return result[0] if result else None
-                        else:
-                            cur.execute("SELECT topic, insights FROM global_knowledge")
-                            rows = cur.fetchall()
-                            logging.info("Fetched all global knowledge.")
-                            return {row[0]: row[1] for row in rows}
+        return scores
+
+    def _analyze_emotional_patterns(self, text: str) -> Dict[str, Any]:
+        """Analyze emotional expression patterns"""
+        text_lower = text.lower()
+        emotion_scores = {}
+
+        for emotion, keywords in self.emotion_patterns.items():
+            matches = sum(1 for keyword in keywords if keyword in text_lower)
+            word_count = len(text.split())
+            if word_count > 0:
+                emotion_scores[emotion] = min(1.0, (matches / word_count) * 1000)
             else:
-                mem = self.get_local(user_id)
-                if key:
-                    if not isinstance(key, str):
-                        raise TypeError(f"Local memory key must be str, got {type(key)}")
-                    logging.info(f"Fetched local memory for user {user_id}, key: {key}")
-                    return mem.get(key)
-                logging.info(f"Fetched all local memory for user {user_id}.")
-                return mem
-        except Exception as e:
-            logging.error(f"MemoryAPI.get error: {e}")
-            raise
+                emotion_scores[emotion] = 0.0
 
-    def store_moment(self, moment):
-        # Store moment in SQLite
-        tags_str = ','.join(moment.tags)
-        self.sqlite_conn.execute("INSERT INTO moments (id, user_id, summary, emotion, glyph, tags, timestamp, embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET summary=excluded.summary, emotion=excluded.emotion, glyph=excluded.glyph, tags=excluded.tags, timestamp=excluded.timestamp, embedding=excluded.embedding", (
-            moment.id, moment.user_id, moment.summary, moment.emotion, moment.glyph, tags_str, moment.timestamp, moment.embedding
-        ))
-        self.sqlite_conn.commit()
+        # Calculate emotional stability (inverse of emotional variance)
+        emotion_values = list(emotion_scores.values())
+        if emotion_values:
+            emotional_variance = sum((x - sum(emotion_values)/len(emotion_values))**2 for x in emotion_values) / len(emotion_values)
+            emotional_stability = 1.0 - min(1.0, emotional_variance)
+        else:
+            emotional_stability = 0.5
 
-    def get_moments(self, user_id, tags=None, since=None, until=None):
-        query = "SELECT id, user_id, summary, emotion, glyph, tags, timestamp, embedding FROM moments WHERE user_id = ?"
-        params = [user_id]
-        if tags:
-            query += " AND (" + " OR ".join(["tags LIKE ?" for _ in tags]) + ")"
-            params += [f"%{tag}%" for tag in tags]
-        if since:
-            query += " AND timestamp >= ?"
-            params.append(since)
-        if until:
-            query += " AND timestamp <= ?"
-            params.append(until)
-        rows = self.sqlite_conn.execute(query, tuple(params)).fetchall()
-        moments = []
-        for row in rows:
-            moments.append({
-                "id": row[0], "user_id": row[1], "summary": row[2], "emotion": row[3], "glyph": row[4],
-                "tags": row[5].split(","), "timestamp": row[6], "embedding": row[7]
-            })
-        return moments
+        return {
+            'emotion_scores': emotion_scores,
+            'emotional_stability': emotional_stability,
+            'dominant_emotion': max(emotion_scores.items(), key=lambda x: x[1])[0] if emotion_scores else 'neutral'
+        }
 
-    def semantic_search_moments(self, user_id, query_embedding, top_k=5):
-        # Search moments by cosine similarity to query_embedding
-        import numpy as np
-        rows = self.sqlite_conn.execute("SELECT id, user_id, summary, emotion, glyph, tags, timestamp, embedding FROM moments WHERE user_id = ?", (user_id,)).fetchall()
-        scored = []
-        for row in rows:
-            emb = row[7]
+    def _analyze_communication_style(self, text: str) -> Dict[str, float]:
+        """Analyze communication style preferences"""
+        text_lower = text.lower()
+        style_scores = {}
+
+        for style, keywords in self.communication_styles.items():
+            matches = sum(1 for keyword in keywords if keyword in text_lower)
+            word_count = len(text.split())
+            if word_count > 0:
+                style_scores[style] = min(1.0, (matches / word_count) * 1000)
+            else:
+                style_scores[style] = 0.0
+
+        return style_scores
+
+    def _analyze_cognitive_patterns(self, text: str) -> Dict[str, Any]:
+        """Analyze cognitive processing patterns"""
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        # Question patterns
+        question_count = text.count('?')
+        total_sentences = len(sentences)
+
+        # Complexity metrics
+        avg_sentence_length = sum(len(s.split()) for s in sentences) / max(1, total_sentences)
+        unique_words = len(set(text.lower().split()))
+        total_words = len(text.split())
+        lexical_diversity = unique_words / max(1, total_words)
+
+        # Reasoning patterns
+        reasoning_indicators = ['because', 'therefore', 'however', 'although', 'since', 'due to']
+        reasoning_score = sum(1 for word in reasoning_indicators if word in text.lower())
+
+        return {
+            'avg_sentence_length': avg_sentence_length,
+            'lexical_diversity': lexical_diversity,
+            'question_ratio': question_count / max(1, total_sentences),
+            'reasoning_score': reasoning_score,
+            'sentence_count': total_sentences
+        }
+
+    def _analyze_temporal_patterns(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """Analyze temporal conversation patterns"""
+        if not conversation_history:
+            return {'session_duration': 0, 'message_frequency': 0, 'response_times': []}
+
+        timestamps = self._extract_timestamps(conversation_history)
+        if len(timestamps) < 2:
+            return {'session_duration': 0, 'message_frequency': 0, 'response_times': []}
+
+        session_duration = self._calculate_session_duration(timestamps)
+        message_frequency = self._calculate_message_frequency(len(timestamps), session_duration)
+        response_times = self._calculate_response_times(conversation_history, timestamps)
+
+        return {
+            'session_duration': session_duration,
+            'message_frequency': message_frequency,
+            'avg_response_time': sum(response_times) / max(1, len(response_times)),
+            'response_times': response_times
+        }
+
+    def _extract_timestamps(self, conversation_history: List[Dict]) -> List[datetime]:
+        """Extract valid timestamps from conversation history"""
+        timestamps = []
+        for msg in conversation_history:
+            if 'timestamp' not in msg:
+                continue
+            
             try:
-                emb_vec = np.array([float(x) for x in emb.split(",")])
-                query_vec = np.array([float(x) for x in query_embedding.split(",")])
-                sim = float(np.dot(emb_vec, query_vec) / (np.linalg.norm(emb_vec) * np.linalg.norm(query_vec)))
-            except Exception:
-                sim = 0.0
-            scored.append((sim, row))
-        scored.sort(reverse=True)
-        moments = []
-        for sim, row in scored[:top_k]:
-            moments.append({
-                "id": row[0], "user_id": row[1], "summary": row[2], "emotion": row[3], "glyph": row[4],
-                "tags": row[5].split(","), "timestamp": row[6], "embedding": row[7], "similarity": sim
-            })
-        return moments
-    # ...existing code...
+                if isinstance(msg['timestamp'], str):
+                    timestamps.append(datetime.fromisoformat(msg['timestamp']))
+                elif isinstance(msg['timestamp'], (int, float)):
+                    timestamps.append(datetime.fromtimestamp(msg['timestamp']))
+            except (ValueError, TypeError, OSError):
+                continue
+        return timestamps
 
-    def get_global(self, topic=None):
-        with self.pg_conn.cursor() as cur:
-            if topic:
-                cur.execute("SELECT topic, insights, emotional_tone, ts FROM global_knowledge WHERE topic = %s", (topic,))
-            else:
-                cur.execute("SELECT topic, insights, emotional_tone, ts FROM global_knowledge")
-            return cur.fetchall()
+    def _calculate_session_duration(self, timestamps: List[datetime]) -> float:
+        """Calculate session duration in seconds"""
+        if len(timestamps) < 2:
+            return 0
+        return (max(timestamps) - min(timestamps)).total_seconds()
 
-    def push_global(self, topic, insights, emotional_tone, ts):
-        with self.pg_conn.cursor() as cur:
-            cur.execute("INSERT INTO global_knowledge (topic, insights, emotional_tone, ts) VALUES (%s, %s, %s, %s)",
-                        (topic, insights, emotional_tone, ts))
-            self.pg_conn.commit()
+    def _calculate_message_frequency(self, message_count: int, session_duration: float) -> float:
+        """Calculate message frequency (messages per hour)"""
+        return message_count / max(1, session_duration / 3600)
 
-app = FastAPI(title="Decentralized Memory API", description="Key-value and moment memory API for AGI agents.", version="1.0.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost", "http://127.0.0.1"],  # Restrict to local dev for now
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    def _calculate_response_times(self, conversation_history: List[Dict], timestamps: List[datetime]) -> List[float]:
+        """Calculate response times for assistant responses"""
+        response_times = []
+        user_timestamps = [t for msg, t in zip(conversation_history, timestamps) if msg.get('sender') == 'user']
+        assistant_timestamps = [t for msg, t in zip(conversation_history, timestamps) if msg.get('sender') == 'assistant']
 
-API_KEY_NAME = "X-API-Key"
-SIGNATURE_HEADER = "X-Signature"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-signature_header = APIKeyHeader(name=SIGNATURE_HEADER, auto_error=False)
-API_KEYS = {"testkey"}  # Replace with real keys or decentralized auth
-SHARED_SECRET = os.getenv("KNOWLEDGE_SYNC_SECRET", "supersecret")
+        for i in range(min(len(user_timestamps), len(assistant_timestamps))):
+            if i < len(assistant_timestamps) and i < len(user_timestamps):
+                response_time = (assistant_timestamps[i] - user_timestamps[i]).total_seconds()
+                if 0 < response_time < 300:  # Reasonable response time
+                    response_times.append(response_time)
 
-def get_api_key(api_key: str = Depends(api_key_header)):
-    if api_key is None or api_key not in API_KEYS:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
-    return api_key
+        return response_times
 
-def sign_payload(payload: str, secret: str = SHARED_SECRET) -> str:
-    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest()
-    return base64.b64encode(sig).decode()
+    def _calculate_engagement_metrics(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """Calculate user engagement metrics"""
+        user_messages = [msg for msg in conversation_history if msg.get('sender') == 'user']
+        assistant_messages = [msg for msg in conversation_history if msg.get('sender') == 'assistant']
 
-def verify_signature(payload: str, signature: str, secret: str = SHARED_SECRET) -> bool:
-    expected = sign_payload(payload, secret)
-    return hmac.compare_digest(expected, signature)
+        # Message length analysis
+        user_lengths = [len(msg.get('text', '').split()) for msg in user_messages]
+        assistant_lengths = [len(msg.get('text', '').split()) for msg in assistant_messages]
 
-# Pydantic models based on your proto definitions
-class SetRequest(BaseModel):
-    user_id: str
-    key: str
-    value: str
+        # Conversation depth (back-and-forth exchanges)
+        conversation_depth = min(len(user_messages), len(assistant_messages))
 
-class SetResponse(BaseModel):
-    success: bool
+        # Topic persistence (simplified)
+        user_texts = [msg.get('text', '') for msg in user_messages]
+        topic_persistence = len(set(user_texts)) / max(1, len(user_texts))  # Unique messages ratio
 
-class GetRequest(BaseModel):
-    user_id: str
-    key: str
+        return {
+            'avg_user_message_length': sum(user_lengths) / max(1, len(user_lengths)),
+            'avg_assistant_message_length': sum(assistant_lengths) / max(1, len(assistant_lengths)),
+            'conversation_depth': conversation_depth,
+            'topic_persistence': topic_persistence,
+            'total_exchanges': len(conversation_history)
+        }
 
-class GetResponse(BaseModel):
-    value: Optional[str] = None
-    found: bool
-
-class UserContextRequest(BaseModel):
-    user_id: str
-
-class UserContextResponse(BaseModel):
-    context: str
-
-class Moment(BaseModel):
-    id: str
-    user_id: str
-    summary: str
-    emotion: str
-    glyph: str
-    tags: List[str]
-    timestamp: int
-    embedding: str
-
-class SetMomentRequest(BaseModel):
-    moment: Moment
-
-class GetMomentsRequest(BaseModel):
-    user_id: str
-    tags: Optional[List[str]] = None
-    since: Optional[int] = None
-    until: Optional[int] = None
-
-class GetMomentsResponse(BaseModel):
-    moments: List[Moment]
-
-class SemanticSearchRequest(BaseModel):
-    user_id: str
-    query: str
-
-class SemanticSearchResponse(BaseModel):
-    results: List[Moment]
+    def _default_personality_profile(self) -> Dict[str, Any]:
+        """Return default personality profile"""
+        return {
+            'personality_scores': {trait: 0.5 for trait in self.personality_dimensions.keys()},
+            'emotional_profile': {
+                'emotion_scores': {emotion: 0.0 for emotion in self.emotion_patterns.keys()},
+                'emotional_stability': 0.5,
+                'dominant_emotion': 'neutral'
+            },
+            'communication_style': {style: 0.0 for style in self.communication_styles.keys()},
+            'cognitive_patterns': {
+                'avg_sentence_length': 15.0,
+                'lexical_diversity': 0.5,
+                'question_ratio': 0.1,
+                'reasoning_score': 0,
+                'sentence_count': 0
+            },
+            'temporal_patterns': {
+                'session_duration': 0,
+                'message_frequency': 0,
+                'avg_response_time': 0,
+                'response_times': []
+            },
+            'engagement_metrics': {
+                'avg_user_message_length': 10,
+                'avg_assistant_message_length': 20,
+                'conversation_depth': 0,
+                'topic_persistence': 0,
+                'total_exchanges': 0
+            },
+            'analysis_timestamp': datetime.now().isoformat(),
+            'conversation_count': 0,
+            'user_message_count': 0,
+            'assistant_message_count': 0
+        }
 
 
-# Initialize database-backed stores
-# Initialize database-backed stores
-mem_api = MemoryAPI()
-# ...existing code...
+class MemoryAPIClient:
+    """Production-ready memory API client with advanced personality analysis"""
 
+    def __init__(self, base_url: str = "http://localhost:8001"):
+        self.base_url = base_url
+        self.client = httpx.Client(timeout=30.0)
+        self.analyzer = ConversationAnalyzer()
 
-class GlobalKnowledgePushRequest(BaseModel):
-    topic: str
-    insights: str
-    emotional_tone: str
-    ts: int
+        # Batch processing settings
+        self.batch_size = 10
+        self.batch_timeout = 300  # 5 minutes
+        self.pending_updates = defaultdict(list)
 
-class GlobalKnowledgeResponse(BaseModel):
-    knowledge: List[dict]
+    def get_user_context(self, user_id: str) -> Dict[str, Any]:
+        """Get comprehensive user context including personality analysis"""
+        try:
+            # Get basic memory context
+            response = self.client.post(f"{self.base_url}/user_context",
+                                      json={"user_id": user_id})
+            response.raise_for_status()
+            basic_context = response.json()
 
-@app.post("/push_global_knowledge", response_model=SetResponse, tags=["Global"])
-async def push_global_knowledge(req: GlobalKnowledgePushRequest, request: Request, api_key: str = Depends(get_api_key), signature: str = Depends(signature_header)):
-    # Serialize payload for signing
-    import json, logging
-    payload = json.dumps(req.dict(), sort_keys=True)
-    if not signature or not verify_signature(payload, signature):
-        logging.warning(f"Signature verification failed for push_global_knowledge: {payload}")
-        raise HTTPException(status_code=401, detail="Invalid or missing signature")
-    try:
-        mem_api.push_global(req.topic, req.insights, req.emotional_tone, req.ts)
-        # Audit log
-        client_host = getattr(getattr(request, "client", None), "host", "unknown")
-        logging.info(f"Global knowledge pushed: {req.topic} by {client_host}")
-        return SetResponse(success=True)
-    except Exception as e:
-        logging.error(f"Global knowledge push error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            # Get personality data
+            personality_response = self.client.post(f"{self.base_url}/get-personality",
+                                                  json={"user_id": user_id})
+            personality_data = {}
+            if personality_response.status_code == 200:
+                personality_data = personality_response.json()
 
-@app.get("/get_global_knowledge", response_model=GlobalKnowledgeResponse, tags=["Global"])
-async def get_global_knowledge(request: Request, api_key: str = Depends(get_api_key), signature: str = Depends(signature_header)):
-    import json, logging
-    # For GET, sign the query string (or empty string)
-    client_host = getattr(getattr(request, "client", None), "host", "unknown")
-    payload = json.dumps({"requestor": str(client_host)}, sort_keys=True)
-    if not signature or not verify_signature(payload, signature):
-        logging.warning(f"Signature verification failed for get_global_knowledge: {payload}")
-        raise HTTPException(status_code=401, detail="Invalid or missing signature")
-    try:
-        rows = mem_api.get_global()
-        knowledge = [
-            {"topic": r[0], "insights": r[1], "emotional_tone": r[2], "ts": r[3]} for r in rows
-        ]
-        logging.info(f"Global knowledge fetched by {client_host}")
-        return GlobalKnowledgeResponse(knowledge=knowledge)
-    except Exception as e:
-        logging.error(f"Global knowledge fetch error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            # Get conversation history for analysis
+            conversation_history = self._get_conversation_history(user_id)
 
-@app.post("/set", response_model=SetResponse, tags=["Memory"])
-async def set_memory(req: SetRequest, api_key: str = Depends(get_api_key)):
-    try:
-        mem_api.store_local(req.user_id, {req.key: req.value})
-        return SetResponse(success=True)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+            # Perform advanced analysis
+            analysis = self.analyzer.analyze_conversation(conversation_history)
 
-@app.post("/get", response_model=GetResponse, tags=["Memory"])
-async def get_memory(req: GetRequest, api_key: str = Depends(get_api_key)):
-    try:
-        mem = mem_api.get_local(req.user_id)
-        value = mem.get(req.key)
-        found = value is not None
-        return GetResponse(value=value, found=found)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+            return {
+                'basic_context': basic_context.get('context', ''),
+                'personality_data': personality_data,
+                'advanced_analysis': analysis,
+                'user_id': user_id,
+                'timestamp': datetime.now().isoformat()
+            }
 
-@app.post("/user_context", response_model=UserContextResponse, tags=["Memory"])
-async def get_user_context(req: UserContextRequest, api_key: str = Depends(get_api_key)):
-    try:
-        mem = mem_api.get_local(req.user_id)
-        count = len(mem)
-        context = f"Total memory items: {count}\n"
-        for k, v in mem.items():
-            context += f"{k}: {v}\n"
-        return UserContextResponse(context=context)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@app.post("/dump_memory", tags=["Memory"])
-async def dump_memory(req: UserContextRequest, api_key: str = Depends(get_api_key)):
-    try:
-        mem = mem_api.get_local(req.user_id)
-        return {"memory": mem}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            print(f"Error getting user context: {e}")
+            return {
+                'basic_context': '',
+                'personality_data': {},
+                'advanced_analysis': self.analyzer._default_personality_profile(),
+                'user_id': user_id,
+                'error': str(e)
+            }
 
-@app.post("/set_moment", response_model=SetResponse, tags=["Moments"])
-async def set_moment(req: SetMomentRequest, api_key: str = Depends(get_api_key)):
-    try:
-        mem_api.store_moment(req.moment)
-        return SetResponse(success=True)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    def _get_conversation_history(self, user_id: str, limit: int = 50) -> List[Dict]:
+        """Get recent conversation history for analysis"""
+        try:
+            # This would need to be implemented based on your storage system
+            # For now, return empty list
+            return []
+        except Exception as e:
+            print(f"Error getting conversation history: {e}")
+            return []
 
-@app.post("/get_moments", response_model=GetMomentsResponse, tags=["Moments"])
-async def get_moments(req: GetMomentsRequest, api_key: str = Depends(get_api_key)):
-    try:
-        moments = mem_api.get_moments(req.user_id, tags=req.tags, since=req.since, until=req.until)
-        return GetMomentsResponse(moments=moments or [])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    def update_personality_batch(self, user_id: str, conversation_data: List[Dict]):
+        """Batch update personality analysis to reduce PostgreSQL calls"""
+        self.pending_updates[user_id].extend(conversation_data)
 
-@app.post("/semantic_search", response_model=SemanticSearchResponse, tags=["Moments"])
-async def semantic_search(req: SemanticSearchRequest, api_key: str = Depends(get_api_key)):
-    try:
-        # Assume req.query is a comma-separated embedding string
-        moments = mem_api.semantic_search_moments(req.user_id, req.query)
-        return SemanticSearchResponse(results=moments)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Process batch if threshold reached
+        if len(self.pending_updates[user_id]) >= self.batch_size:
+            self._process_personality_batch(user_id)
+
+    def _process_personality_batch(self, user_id: str):
+        """Process accumulated personality updates"""
+        if not self.pending_updates[user_id]:
+            return
+
+        try:
+            # Combine all pending updates
+            all_conversations = self.pending_updates[user_id]
+
+            # Perform comprehensive analysis
+            analysis = self.analyzer.analyze_conversation(all_conversations)
+
+            # Update PostgreSQL with aggregated insights
+            self._update_global_personality_matrix(user_id, analysis)
+
+            # Clear processed updates
+            self.pending_updates[user_id].clear()
+
+        except Exception as e:
+            print(f"Error processing personality batch: {e}")
+
+    def _update_global_personality_matrix(self, user_id: str, analysis: Dict):
+        """Update global personality learning matrix"""
+        try:
+            # Extract key personality scores
+            personality_scores = analysis.get('personality_scores', {})
+
+            # Send to PostgreSQL for global learning
+            for trait, score in personality_scores.items():
+                payload = {
+                    'user_id': user_id,
+                    'trait': trait,
+                    'score': score,
+                    'analysis_data': analysis
+                }
+
+                response = self.client.post(f"{self.base_url}/update-personality-trait",
+                                          json=payload)
+
+                if response.status_code != 200:
+                    print(f"Failed to update personality trait {trait}: {response.text}")
+
+        except Exception as e:
+            print(f"Error updating global personality matrix: {e}")
+
+    def get_similar_users(self, user_id: str, trait: Optional[str] = None, limit: int = 5) -> List[Dict]:
+        """Find users with similar personality profiles for collaborative learning"""
+        try:
+            payload = {
+                'user_id': user_id,
+                'trait': trait,
+                'limit': limit
+            }
+
+            response = self.client.post(f"{self.base_url}/find-similar-users",
+                                      json=payload)
+            response.raise_for_status()
+
+            return response.json().get('similar_users', [])
+
+        except Exception as e:
+            print(f"Error finding similar users: {e}")
+            return []
+
+    def get_global_insights(self, trait: Optional[str] = None) -> Dict[str, Any]:
+        """Get global personality insights and trends"""
+        try:
+            payload = {'trait': trait} if trait else {}
+
+            response = self.client.post(f"{self.base_url}/global-personality-insights",
+                                      json=payload)
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            print(f"Error getting global insights: {e}")
+            return {'error': str(e)}
+
+    def store_memory(self, user_id: str, key: str, value: str) -> bool:
+        """Store user-specific memory in SQLite"""
+        try:
+            response = self.client.post(f"{self.base_url}/set-memory",
+                                      json={"user_id": user_id, "key": key, "value": value})
+            response.raise_for_status()
+            return response.json().get('success', False)
+        except Exception as e:
+            print(f"Error storing memory: {e}")
+            return False
+
+    def retrieve_memory(self, user_id: str, key: str) -> str:
+        """Retrieve user-specific memory from SQLite"""
+        try:
+            response = self.client.post(f"{self.base_url}/get-memory",
+                                      json={"user_id": user_id, "key": key})
+            response.raise_for_status()
+            return response.json().get('value', '')
+        except Exception as e:
+            print(f"Error retrieving memory: {e}")
+            return ""
+
+    def add_conversation_context(self, user_id: str, message: str, response: str):
+        """Add conversation context for personality analysis"""
+        conversation_data = {
+            'user_message': message,
+            'assistant_response': response,
+            'timestamp': datetime.now().isoformat(),
+            'user_id': user_id
+        }
+
+        # Add to batch for processing
+        self.update_personality_batch(user_id, [conversation_data])
+
+    def store_post(self, user_id: str, post_id: str, content: str, timestamp: int, tags: List[str]) -> bool:
+        """Store a Facebook post in memory"""
+        try:
+            payload: Dict[str, Any] = {
+                "user_id": user_id,
+                "post_id": post_id,
+                "content": content,
+                "timestamp": timestamp,
+                "tags": tags
+            }
+            print(f"[DEBUG] Storing post payload: {payload}")
+            response = self.client.post(f"{self.base_url}/store-post", json=payload)
+            print(f"[DEBUG] Store post response status: {response.status_code}")
+            if response.status_code != 200:
+                print(f"[DEBUG] Store post response text: {response.text}")
+            response.raise_for_status()
+            return response.json().get('success', False)
+        except Exception as e:
+            print(f"Error storing post: {e}")
+            return False
+
+    def get_posts(self, user_id: str, tags: Optional[List[str]] = None, since: Optional[int] = None, until: Optional[int] = None) -> List[Dict]:
+        """Get posts from memory"""
+        try:
+            payload: Dict[str, Any] = {"user_id": user_id}
+            if tags:
+                payload["tags"] = tags
+            if since:
+                payload["since"] = since
+            if until:
+                payload["until"] = until
+
+            response = self.client.post(f"{self.base_url}/get-posts", json=payload)
+            response.raise_for_status()
+            return response.json().get('posts', [])
+        except Exception as e:
+            print(f"Error getting posts: {e}")
+            return []
+
+    def store_journal_entry(self, user_id: str, journal_data: Dict[str, Any]) -> bool:
+        """Store a journal entry in memory"""
+        try:
+            payload = {
+                "user_id": user_id,
+                "journal_data": journal_data
+            }
+            
+            response = self.client.post(f"{self.base_url}/store-journal-entry", json=payload)
+            response.raise_for_status()
+            return response.json().get('success', False)
+        except Exception as e:
+            print(f"Error storing journal entry: {e}")
+            return False
+
+    def get_journal_entries(self, user_id: str, limit: int = 10) -> List[Dict]:
+        """Get journal entries from memory"""
+        try:
+            payload = {
+                "user_id": user_id,
+                "limit": limit
+            }
+            
+            response = self.client.post(f"{self.base_url}/get-journal-entries", json=payload)
+            response.raise_for_status()
+            return response.json().get('entries', [])
+        except Exception as e:
+            print(f"Error getting journal entries: {e}")
+            return []

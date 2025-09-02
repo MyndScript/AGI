@@ -1,5 +1,6 @@
 """
 Centralized API Client for AGI Decentralized Stack
+Overseer-compatible: All requests routed through overseer gateway (port 8010)
 Handles all memory, personality, and global knowledge operations via REST endpoints.
 """
 import httpx
@@ -13,16 +14,25 @@ API_KEY = os.getenv("AGI_API_KEY", "testkey")
 SHARED_SECRET = os.getenv("KNOWLEDGE_SYNC_SECRET", "supersecret")
 HEADERS = {"X-API-Key": API_KEY}
 
+
+# All requests routed through overseer gateway
+OVERSEER_PORT = int(os.getenv("AGI_OVERSEER_PORT", 8010))
+OVERSEER_URL = f"http://localhost:{OVERSEER_PORT}"
+
 # Utility for signing payloads
 def sign_payload(payload: str, secret: str = SHARED_SECRET) -> str:
     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest()
     return base64.b64encode(sig).decode()
 
 class AGIAPIClient:
-    def __init__(self, memory_url, personality_url, global_url):
-        self.memory_url = memory_url
-        self.personality_url = personality_url
-        self.global_url = global_url
+    def generate_personalized_response(self, user_id, prompt, context):
+        payload = {"user_id": user_id, "prompt": prompt, "context": context}
+        return self.post(f"{self.personality_url}/generate-personalized-response", payload).get("reply", "I'm here for you. How can I help?")
+    def __init__(self, memory_url=None, personality_url=None, global_url=None):
+        # All endpoints routed through overseer gateway
+        self.memory_url = memory_url or f"{OVERSEER_URL}/memory"
+        self.personality_url = personality_url or f"{OVERSEER_URL}/personality"
+        self.global_url = global_url or f"{OVERSEER_URL}/global"
 
     def post(self, url, data):
         payload = json.dumps(data, sort_keys=True)
@@ -64,8 +74,10 @@ class AGIAPIClient:
     def get_personality(self, user_id):
         return self.post(f"{self.personality_url}/get-personality", {"user_id": user_id})
 
-    def add_observation(self, user_id, observation):
-        return self.post(f"{self.personality_url}/add-observation", {"user_id": user_id, "observation": observation})
+    def add_observation(self, user_id, moment):
+        # 'moment' should be a dict with keys: id, user_id, summary, emotion, glyph, tags, timestamp, embedding
+        payload = {"moment": moment}
+        return self.post(f"{self.personality_url}/add-observation", payload)
 
     # Global knowledge operations
     def push_global_knowledge(self, topic, insights, emotional_tone, ts):

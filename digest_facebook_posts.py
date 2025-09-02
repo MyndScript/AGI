@@ -6,10 +6,13 @@ INPUT_PATH = "extracted_posts.json"
 OUTPUT_PATH = "digested_posts.json"
 
 # Load custom or best available models
-# You can replace these with your own fine-tuned models if needed
+# Upgraded models for better performance and quality
 emotion_classifier = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=1)
 intent_classifier = pipeline("text-classification", model="joeddav/distilbert-base-uncased-go-emotions-student", top_k=1)
-semantic_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Upgraded embedding model: Better quality (768 dims vs 384)
+# For production, consider: BAAI/bge-large-en-v1.5 (1024 dims, state-of-the-art)
+semantic_model = SentenceTransformer("all-mpnet-base-v2")  # Upgraded from all-MiniLM-L6-v2
 
 def digest_post(content):
     # Truncate content for classifier models (max 512 chars)

@@ -1,13 +1,28 @@
 import psutil
 def kill_port(port):
-    for proc in psutil.process_iter(['pid', 'name']):
+    try:
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                for conn in proc.connections(kind='inet'):
+                    if conn.laddr.port == port:
+                        print(f"[Ritual Shell] Terminating process {proc.pid} on port {port}...")
+                        proc.terminate()
+            except Exception:
+                continue
+    except ImportError:
+        # Fallback to taskkill if psutil not available
+        import subprocess
         try:
-            for conn in proc.connections(kind='inet'):
-                if conn.laddr.port == port:
-                    print(f"[Ritual Shell] Terminating process {proc.pid} on port {port}...")
-                    proc.terminate()
-        except Exception:
-            continue
+            result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, shell=False)
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                if f":{port}" in line:
+                    parts = line.split()
+                    pid = parts[-1]
+                    if pid.isdigit():
+                        subprocess.run(["taskkill", "/PID", pid, "/F"], shell=False)
+        except Exception as e:
+            print(f"[Ritual Shell] Error clearing port {port}: {e}")
 """
 Ritual Shell: AGI Orchestration Script
 Launches, binds, and narrates the AGI system (UI, agent, memory server)
@@ -50,16 +65,22 @@ import threading
 
 SERVICES = [
     {
+        "name": "Memory Server",
+        "cmd": [r"c:\Users\Ommi\Desktop\AGI\memory\memory_rest_server.exe"],
+        "port": 8001,
+        "emotion": "wisdom"
+    },
+    {
         "name": "Personality Server",
         "cmd": [sys.executable, "decentralized_personality_server.py"],
-        "port": 8003,
+        "port": 8002,
         "emotion": "empathy"
     },
     {
-        "name": "Memory Server",
-        "cmd": [r"c:\Users\Ommi\Desktop\AGI\memory\memory_rest_server.exe"],
-        "port": 8002,
-        "emotion": "wisdom"
+        "name": "Embedding Server",
+        "cmd": [r"c:\Users\Ommi\Desktop\AGI\memory\personality_embedding_server.exe"],
+        "port": 8004,
+        "emotion": "curiosity"
     },
     {
         "name": "Agent",

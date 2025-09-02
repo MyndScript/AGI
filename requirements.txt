@@ -4,3 +4,4 @@ transformers
 httpx
 python-multipart
 torch
+psutil
