@@ -13,9 +13,9 @@ import numpy as np
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from collections import defaultdict, deque
+from collections import defaultdict
 import sqlite3
 import hashlib
 
@@ -393,7 +393,7 @@ class AdvancedPersonalityEngine:
             conn.commit()
     
     def analyze_user_personality(self, user_id: str, interaction_texts: List[str], 
-                               embeddings: List[Dict] = None) -> PersonalitySnapshot:
+                               embeddings: Optional[List[Dict]] = None) -> PersonalitySnapshot:
         """
         Comprehensive personality analysis using TGA methodology
         """
@@ -550,12 +550,12 @@ class AdvancedPersonalityEngine:
         sample_factor = min(1.0, len(texts) / 50)  # Full confidence at 50+ texts
         
         # Consistency factor (how consistent are the facet scores)
-        consistency = 1.0 - np.std(list(facet_scores.values()))
+        consistency = 1.0 - float(np.std(list(facet_scores.values())))
         consistency = max(0.0, min(1.0, consistency))
         
         # Text quality factor (average text length)
         if texts:
-            avg_length = np.mean([len(text.split()) for text in texts])
+            avg_length = float(np.mean([len(text.split()) for text in texts]))
             length_factor = min(1.0, avg_length / 20)  # Full confidence at 20+ words per text
         else:
             length_factor = 0.0
@@ -573,7 +573,7 @@ class AdvancedPersonalityEngine:
             "facets": snapshot.facet_scores,
             "meta_traits": snapshot.meta_traits
         }
-        snapshot_hash = hashlib.md5(json.dumps(snapshot_data, sort_keys=True).encode()).hexdigest()
+        snapshot_hash = hashlib.sha256(json.dumps(snapshot_data, sort_keys=True).encode()).hexdigest()
         
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
