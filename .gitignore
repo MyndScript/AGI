@@ -1,6 +1,67 @@
 
+# Security - Prevent secrets from being committed
+.env
+.env.local
+.env.production
+*.key
+*.pem
+*.p12
+config/secrets.json
+secrets/
+.secrets/
+
+# API Keys and sensitive data
+**/api_keys.json
+**/credentials.json
+**/*secret*
+**/*password*
+**/*token*
+
+# Database files that might contain user data
+*.db
+*.sqlite
+*.sqlite3
+user_memory.db
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# IDEs
+.vscode/settings.json
+.vscode/launch.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Build outputs
+ui/dist/
+ui/build/
+
+# Log files
+*.log
+
+# Data files that might contain sensitive user information
+memory_graph.json
+extracted_posts.json
+filtered_posts*.json
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
-
-.env
