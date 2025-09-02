@@ -5,9 +5,12 @@ FastAPI server for personality analysis using unified engine
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, AsyncGenerator
 import uvicorn
+import json
+import asyncio
 
 from .unified_personality_engine import UnifiedPersonalityEngine
 
@@ -15,6 +18,34 @@ app = FastAPI(title="Personality Analysis Server", version="2.0.0")
 
 # Global personality engine instance
 personality_engine = UnifiedPersonalityEngine()
+
+# Model backend configuration
+MODEL_BACKENDS = {
+    "local": {
+        "type": "local",
+        "enabled": True,
+        "description": "Local personality engine"
+    },
+    "remote": {
+        "type": "remote", 
+        "enabled": False,
+        "url": "http://localhost:8003",
+        "description": "Remote model backend"
+    },
+    "quantized": {
+        "type": "quantized",
+        "enabled": False,
+        "model_path": "./models/quantized",
+        "description": "Quantized model for performance"
+    }
+}
+
+def get_active_backend():
+    """Get the currently active model backend"""
+    for backend_name, config in MODEL_BACKENDS.items():
+        if config.get("enabled", False):
+            return backend_name, config
+    return "local", MODEL_BACKENDS["local"]  # fallback to local
 
 # === REQUEST/RESPONSE MODELS ===
 class PersonalityRequest(BaseModel):
@@ -32,6 +63,19 @@ class PersonalityResponse(BaseModel):
     mood_vector: Dict[str, float]
     communication_style: str
     response_modulation: Dict[str, Any]
+
+class ErrorResponse(BaseModel):
+    status: str = "error"
+    error_code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+class StreamingResponseModel(BaseModel):
+    status: str = "streaming"
+    user_id: str
+    response_chunk: str
+    is_complete: bool = False
+    personality_context: Optional[Dict[str, Any]] = None
 
 # === ENDPOINTS ===
 
@@ -170,17 +214,9 @@ async def get_personality_context(request: PersonalityRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Personality context retrieval failed: {str(e)}")
 
-@app.post("/personalized-response")
-async def personalized_response(request: dict):
-    """Generate a personality-aware response to a message"""
+async def stream_personality_response(user_id: str, message: str, context: dict) -> AsyncGenerator[str, None]:
+    """Stream personality-aware response generation"""
     try:
-        user_id = request.get("user_id", "default")
-        message = request.get("message", "")
-        context = request.get("context", {})
-        
-        if not message:
-            return {"status": "error", "error": "Message is required"}
-        
         # Process the interaction first to update personality
         snapshot = personality_engine.analyze_user_interaction(user_id, message)
         
@@ -195,19 +231,108 @@ async def personalized_response(request: dict):
         # Apply personality modulation
         response = _apply_personality_modulation(base_response, snapshot, archetype_info)
         
-        return {
-            "status": "success",
-            "response": response,
-            "personality_context": {
-                "archetype": snapshot.archetype,
-                "confidence": snapshot.confidence,
-                "mood": mood,
-                "response_style": archetype_info.get('response_style', 'balanced')
-            }
+        # Stream the response word by word with personality context
+        words = response.split()
+        personality_context = {
+            "archetype": snapshot.archetype,
+            "confidence": snapshot.confidence,
+            "mood": mood,
+            "response_style": archetype_info.get('response_style', 'balanced')
         }
         
+        for i, word in enumerate(words):
+            chunk_data = {
+                "status": "streaming",
+                "user_id": user_id,
+                "response_chunk": word + " ",
+                "is_complete": False,
+                "personality_context": personality_context if i == 0 else None
+            }
+            yield f"data: {json.dumps(chunk_data)}\n\n"
+            await asyncio.sleep(0.05)  # Small delay for streaming effect
+        
+        # Send completion signal
+        completion_data = {
+            "status": "complete",
+            "user_id": user_id,
+            "response_chunk": "",
+            "is_complete": True,
+            "personality_context": personality_context
+        }
+        yield f"data: {json.dumps(completion_data)}\n\n"
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Response generation failed: {str(e)}")
+        error_data = {
+            "status": "error",
+            "error_code": "STREAMING_FAILED",
+            "message": f"Streaming response failed: {str(e)}",
+            "details": {"user_id": user_id}
+        }
+        yield f"data: {json.dumps(error_data)}\n\n"
+
+@app.post("/personalized-response")
+async def personalized_response(request: dict):
+    """Generate a personality-aware response to a message"""
+    try:
+        user_id = request.get("user_id", "default")
+        message = request.get("message", "")
+        context = request.get("context", {})
+        stream = request.get("stream", False)
+        
+        if not message:
+            raise HTTPException(
+                status_code=400, 
+                detail=json.dumps({
+                    "status": "error",
+                    "error_code": "MISSING_MESSAGE",
+                    "message": "Message is required",
+                    "details": {"field": "message"}
+                })
+            )
+        
+        if stream:
+            return StreamingResponse(
+                stream_personality_response(user_id, message, context),
+                media_type="text/plain"
+            )
+        else:
+            # Process the interaction first to update personality
+            snapshot = personality_engine.analyze_user_interaction(user_id, message)
+            
+            # Get personality info for response generation
+            traits = snapshot.big_five_scores
+            mood = snapshot.mood_vector
+            archetype_info = personality_engine.archetypes.get(snapshot.archetype, {})
+            
+            # Generate personality-aware response
+            base_response = _generate_contextual_response(message, traits, mood, archetype_info, context)
+            
+            # Apply personality modulation
+            response = _apply_personality_modulation(base_response, snapshot, archetype_info)
+            
+            return {
+                "status": "success",
+                "response": response,
+                "personality_context": {
+                    "archetype": snapshot.archetype,
+                    "confidence": snapshot.confidence,
+                    "mood": mood,
+                    "response_style": archetype_info.get('response_style', 'balanced')
+                }
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=json.dumps({
+                "status": "error",
+                "error_code": "RESPONSE_GENERATION_FAILED",
+                "message": f"Response generation failed: {str(e)}",
+                "details": {"user_id": request.get("user_id", "unknown")}
+            })
+        )
 
 def _generate_contextual_response(message: str, traits: dict, mood: dict, archetype_info: dict, context: dict) -> str:
     """Generate a contextual response based on personality and message content"""
@@ -488,6 +613,105 @@ async def get_archetype(user_id: str):
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Archetype retrieval failed: {str(e)}")
+
+@app.get("/backends")
+async def list_backends():
+    """List available model backends"""
+    active_backend, _ = get_active_backend()
+    return {
+        "status": "success",
+        "backends": MODEL_BACKENDS,
+        "active_backend": active_backend
+    }
+
+@app.post("/backends/{backend_name}/activate")
+async def activate_backend(backend_name: str):
+    """Activate a specific model backend"""
+    if backend_name not in MODEL_BACKENDS:
+        raise HTTPException(
+            status_code=404,
+            detail=json.dumps({
+                "status": "error",
+                "error_code": "BACKEND_NOT_FOUND",
+                "message": f"Backend '{backend_name}' not found",
+                "details": {"available_backends": list(MODEL_BACKENDS.keys())}
+            })
+        )
+    
+    # Deactivate all backends
+    for name in MODEL_BACKENDS:
+        MODEL_BACKENDS[name]["enabled"] = False
+    
+    # Activate the requested backend
+    MODEL_BACKENDS[backend_name]["enabled"] = True
+    
+    return {
+        "status": "success",
+        "message": f"Backend '{backend_name}' activated",
+        "backend_config": MODEL_BACKENDS[backend_name]
+    }
+
+@app.post("/benchmark")
+async def benchmark_response(request: dict):
+    """Benchmark response generation performance"""
+    try:
+        user_id = request.get("user_id", "benchmark_user")
+        messages = request.get("messages", ["Hello, how are you?"])
+        iterations = request.get("iterations", 1)
+        
+        import time
+        results = []
+        
+        for i in range(iterations):
+            for message in messages:
+                start_time = time.time()
+                
+                # Generate response
+                snapshot = personality_engine.analyze_user_interaction(user_id, message)
+                traits = snapshot.big_five_scores
+                mood = snapshot.mood_vector
+                archetype_info = personality_engine.archetypes.get(snapshot.archetype, {})
+                base_response = _generate_contextual_response(message, traits, mood, archetype_info, {})
+                response = _apply_personality_modulation(base_response, snapshot, archetype_info)
+                
+                end_time = time.time()
+                
+                results.append({
+                    "iteration": i + 1,
+                    "message": message,
+                    "response_length": len(response),
+                    "latency_ms": (end_time - start_time) * 1000,
+                    "archetype": snapshot.archetype,
+                    "confidence": snapshot.confidence
+                })
+        
+        # Calculate metrics
+        latencies = [r["latency_ms"] for r in results]
+        response_lengths = [r["response_length"] for r in results]
+        
+        return {
+            "status": "success",
+            "metrics": {
+                "total_requests": len(results),
+                "avg_latency_ms": sum(latencies) / len(latencies),
+                "min_latency_ms": min(latencies),
+                "max_latency_ms": max(latencies),
+                "avg_response_length": sum(response_lengths) / len(response_lengths),
+                "p95_latency_ms": sorted(latencies)[int(len(latencies) * 0.95)]
+            },
+            "results": results[:10]  # Return first 10 results for brevity
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=json.dumps({
+                "status": "error",
+                "error_code": "BENCHMARK_FAILED",
+                "message": f"Benchmark failed: {str(e)}",
+                "details": {"user_id": request.get("user_id", "unknown")}
+            })
+        )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8002)

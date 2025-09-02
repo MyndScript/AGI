@@ -1170,3 +1170,87 @@ class BaseAgent:
         self._learn_and_update(prompt, response, user_id)
         self._update_topic_stack(prompt, response)
         return response
+
+    def benchmark_backends(self, test_prompts, user_id="benchmark_user", iterations=3):
+        """Benchmark different AI backends for performance comparison."""
+        import time
+        
+        results = {
+            "timestamp": time.time(),
+            "backends_tested": [],
+            "metrics": {}
+        }
+        
+        # Test each available backend
+        for service_name in self.active_services + ["transformers"]:
+            backend_results = []
+            
+            for prompt in test_prompts:
+                prompt_latencies = []
+                
+                for i in range(iterations):
+                    start_time = time.time()
+                    
+                    try:
+                        if service_name == "personality_enhanced":
+                            response = self._generate_personality_response(
+                                {"query": prompt, "traits": {}, "mood": {}, "memory": []}, 
+                                prompt, 
+                                []
+                            )
+                        elif service_name == "ollama":
+                            # Test with first available Ollama model
+                            model_name = self.ai_services["ollama"]["models"][0]
+                            response = self._generate_ollama_response(
+                                {"query": prompt, "traits": {}, "mood": {}, "memory": []}, 
+                                model_name
+                            )
+                        elif service_name == "transformers":
+                            # Test with first available transformer model
+                            model_name = self.fallback_models[0]
+                            response = self._generate_transformers_response(
+                                {"query": prompt, "traits": {}, "mood": {}, "memory": []}, 
+                                model_name
+                            )
+                        else:
+                            continue
+                            
+                        end_time = time.time()
+                        latency = (end_time - start_time) * 1000
+                        prompt_latencies.append(latency)
+                        
+                        backend_results.append({
+                            "prompt": prompt,
+                            "iteration": i + 1,
+                            "latency_ms": latency,
+                            "response_length": len(response) if response else 0,
+                            "success": response is not None and len(response.strip()) > 0
+                        })
+                        
+                    except Exception as e:
+                        backend_results.append({
+                            "prompt": prompt,
+                            "iteration": i + 1,
+                            "latency_ms": -1,
+                            "response_length": 0,
+                            "success": False,
+                            "error": str(e)[:100]
+                        })
+            
+            # Calculate metrics for this backend
+            if backend_results:
+                successful_results = [r for r in backend_results if r["success"]]
+                latencies = [r["latency_ms"] for r in successful_results if r["latency_ms"] > 0]
+                
+                results["backends_tested"].append(service_name)
+                results["metrics"][service_name] = {
+                    "total_requests": len(backend_results),
+                    "successful_requests": len(successful_results),
+                    "success_rate": len(successful_results) / len(backend_results),
+                    "avg_latency_ms": sum(latencies) / len(latencies) if latencies else -1,
+                    "min_latency_ms": min(latencies) if latencies else -1,
+                    "max_latency_ms": max(latencies) if latencies else -1,
+                    "avg_response_length": sum(r["response_length"] for r in successful_results) / len(successful_results) if successful_results else 0
+                }
+        
+        return results
