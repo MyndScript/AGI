@@ -32,6 +32,7 @@ import uvicorn
 AGENT_PORT = int(os.getenv('AGI_AGENT_PORT', 8000))
 MEMORY_API_URL = os.getenv('MEMORY_API_URL', 'http://127.0.0.1:8001')
 PERSONALITY_API_URL = os.getenv('PERSONALITY_API_URL', 'http://127.0.0.1:8002')
+USE_ADVANCED_PERSONALITY = os.getenv('USE_ADVANCED_PERSONALITY', 'true').lower() == 'true'
 
 sys.path.append(".")
 

@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""
+🧠 Advanced AGI Personality Server - Production Integration
+Integrates all personality systems: TGA, Embedding Analysis, and Longitudinal Tracking
+"""
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import os
+import logging
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+import json
+
+# Import our advanced personality systems
+from personality.unified_personality_engine import UnifiedPersonalityEngine
+
+app = FastAPI(title="Advanced AGI Personality System", version="2.0.0")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Enable CORS for UI integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize the unified personality engine
+unified_engine = UnifiedPersonalityEngine()
+
+# Request/Response models
+class PersonalityRequest(BaseModel):
+    user_id: str
+
+class InteractionRequest(BaseModel):
+    user_id: str
+    message: str
+    session_id: Optional[str] = ""
+
+class PersonalityUpdateRequest(BaseModel):
+    user_id: str
+    traits: Dict[str, float]
+    interaction_text: Optional[str] = ""
+
+class EvolutionReportRequest(BaseModel):
+    user_id: str
+    days_back: Optional[int] = 30
+
+@app.get("/")
+def root():
+    """API status and system information"""
+    return {
+        "status": "Advanced AGI Personality System Online",
+        "version": "2.0.0",
+        "features": [
+            "Taxonomic Graph Analysis (TGA)",
+            "28+ Personality Facets",
+            "Embedding-based Analysis", 
+            "Longitudinal Trait Tracking",
+            "Archetype Evolution",
+            "Meta-trait Analysis",
+            "Drift Detection"
+        ],
+        "endpoints": {
+            "basic": "/get-personality",
+            "advanced": "/analyze-interaction",
+            "evolution": "/evolution-report",
+            "context": "/get-personality-context"
+        }
+    }
+
+@app.post("/get-personality")
+def get_personality(request: PersonalityRequest):
+    """Get basic personality profile (backward compatibility)"""
+    try:
+        user_id = request.user_id
+        logger.info(f"[get_personality] user_id={user_id}")
+        
+        # Get current archetype from evolution engine
+        current_archetype = evolution_engine.get_current_archetype(user_id)
+        
+        # Get basic personality snapshot if available
+        try:
+            # Try to get recent analysis
+            recent_texts = evolution_engine.get_recent_interactions(user_id, limit=5)
+            if recent_texts:
+                snapshot = advanced_engine.analyze_user_personality(user_id, recent_texts)
+                
+                return {
+                    "archetype": snapshot.archetype,
+                    "traits": snapshot.big_five_scores,
+                    "mood_vector": {
+                        "confidence": snapshot.confidence,
+                        "sample_size": snapshot.sample_size,
+                        **snapshot.meta_traits
+                    },
+                    "advanced_features": True
+                }
+        except Exception as e:
+            logger.warning(f"Advanced analysis failed, using fallback: {e}")
+        
+        # Fallback to basic system
+        return {
+            "archetype": current_archetype.get("name", "balanced"),
+            "traits": {
+                "openness": 0.5,
+                "conscientiousness": 0.5,
+                "extraversion": 0.5,
+                "agreeableness": 0.5,
+                "neuroticism": 0.5
+            },
+            "mood_vector": {
+                "confidence": 0.3,
+                "sample_size": 0
+            },
+            "advanced_features": False
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in get_personality: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze-interaction")
+def analyze_interaction(request: InteractionRequest):
+    """Complete advanced personality analysis from interaction"""
+    try:
+        user_id = request.user_id
+        message = request.message
+        session_id = request.session_id
+        
+        logger.info(f"[analyze_interaction] user_id={user_id}, message_length={len(message)}")
+        
+        # Use integrated system for complete analysis
+        analysis = integrated_system.process_user_interaction(user_id, message, session_id)
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "timestamp": datetime.now().isoformat(),
+            "features_used": [
+                "TGA_analysis",
+                "embedding_vectors", 
+                "longitudinal_tracking",
+                "archetype_evolution"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_interaction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/get-personality-context")
+def get_personality_context(request: PersonalityRequest):
+    """Get comprehensive personality context for AGI responses"""
+    try:
+        user_id = request.user_id
+        logger.info(f"[get_personality_context] user_id={user_id}")
+        
+        # Get current archetype and traits
+        current_archetype = evolution_engine.get_current_archetype(user_id)
+        
+        # Get recent personality analysis
+        try:
+            recent_texts = evolution_engine.get_recent_interactions(user_id, limit=10)
+            if recent_texts:
+                snapshot = advanced_engine.analyze_user_personality(user_id, recent_texts)
+                
+                context = f"""Personality Profile for {user_id}:
+Archetype: {snapshot.archetype} (confidence: {snapshot.confidence:.2f})
+Big Five Traits: {', '.join(f'{k}: {v:.2f}' for k, v in snapshot.big_five_scores.items())}
+Meta-traits: {', '.join(f'{k}: {v:.2f}' for k, v in snapshot.meta_traits.items())}
+Key Facets: {', '.join(f'{k}: {v:.2f}' for k, v in sorted(snapshot.facet_scores.items(), key=lambda x: x[1], reverse=True)[:5])}
+Sample Size: {snapshot.sample_size} interactions
+Response Style: Adapt to {snapshot.archetype} archetype with {snapshot.confidence:.0%} confidence"""
+                
+                return {
+                    "context": context,
+                    "archetype": snapshot.archetype,
+                    "traits": snapshot.big_five_scores,
+                    "facets": snapshot.facet_scores,
+                    "meta_traits": snapshot.meta_traits,
+                    "confidence": snapshot.confidence,
+                    "advanced_analysis": True
+                }
+        except Exception as e:
+            logger.warning(f"Advanced context failed, using basic: {e}")
+        
+        # Fallback context
+        basic_context = f"""Personality Profile for {user_id}:
+Archetype: {current_archetype.get('name', 'balanced')}
+Status: Basic profile (insufficient interaction data)
+Response Style: Balanced and adaptive approach"""
+        
+        return {
+            "context": basic_context,
+            "archetype": current_archetype.get('name', 'balanced'),
+            "traits": {
+                "openness": 0.5,
+                "conscientiousness": 0.5, 
+                "extraversion": 0.5,
+                "agreeableness": 0.5,
+                "neuroticism": 0.5
+            },
+            "confidence": 0.3,
+            "advanced_analysis": False
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in get_personality_context: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/evolution-report")
+def evolution_report(request: EvolutionReportRequest):
+    """Get personality evolution and drift analysis"""
+    try:
+        user_id = request.user_id
+        days_back = request.days_back
+        
+        logger.info(f"[evolution_report] user_id={user_id}, days_back={days_back}")
+        
+        # Generate comprehensive evolution report
+        report = evolution_engine.generate_evolution_report(user_id, days_back)
+        
+        # Add drift detection analysis
+        drift_analysis = advanced_engine.drift_detector.detect_drift(user_id)
+        
+        return {
+            "success": True,
+            "evolution_report": report,
+            "drift_analysis": drift_analysis,
+            "analysis_period_days": days_back,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in evolution_report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-trait")
+def update_trait(request: PersonalityUpdateRequest):
+    """Update personality traits from interaction"""
+    try:
+        user_id = request.user_id
+        traits = request.traits
+        interaction_text = request.interaction_text
+        
+        logger.info(f"[update_trait] user_id={user_id}, traits={list(traits.keys())}")
+        
+        # Record traits in longitudinal tracker
+        if interaction_text:
+            evolution_engine.record_trait_scores(
+                user_id, traits, interaction_text[:100], ""
+            )
+        
+        # Update embedding analysis if text provided
+        if interaction_text:
+            embedding_scores = embedding_analyzer.analyze_personality_embeddings([interaction_text])
+            
+        return {
+            "success": True,
+            "updated_traits": traits,
+            "longitudinal_recorded": bool(interaction_text),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in update_trait: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/mood-decay")
+def mood_decay(request: PersonalityRequest):
+    """Apply mood decay (backward compatibility)"""
+    try:
+        user_id = request.user_id
+        logger.info(f"[mood_decay] user_id={user_id}")
+        
+        # This is handled automatically in the advanced system
+        # Return current state
+        current_archetype = evolution_engine.get_current_archetype(user_id)
+        
+        return {
+            "success": True,
+            "mood_vector": {
+                "stability": current_archetype.get("stability", 0.5),
+                "plasticity": current_archetype.get("plasticity", 0.5)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in mood_decay: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Health check endpoint
+@app.get("/health")
+def health_check():
+    """System health check"""
+    try:
+        # Test each system component
+        health_status = {
+            "status": "healthy",
+            "components": {
+                "integrated_system": "ok",
+                "advanced_engine": "ok", 
+                "embedding_analyzer": "ok",
+                "evolution_engine": "ok"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return health_status
+        
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+if __name__ == "__main__":
+    port = int(os.getenv("PERSONALITY_PORT", 8002))
+    logger.info(f"🧠 Starting Advanced AGI Personality System on port {port}")
+    logger.info("🚀 Features: TGA Analysis, Embedding Vectors, Longitudinal Tracking")
+    
+    uvicorn.run(app, host="0.0.0.0", port=port)

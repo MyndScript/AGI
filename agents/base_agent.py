@@ -8,10 +8,42 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
-try:
-    from transformers import pipeline
-except ImportError:
-    pipeline = None
+
+# Lazy import transformers to avoid blocking initialization
+pipeline = None
+torch = None
+_lazy_loaded = False  # Flag to prevent lazy loading during import
+
+def get_pipeline():
+    global pipeline, torch, _lazy_loaded
+    if not _lazy_loaded:
+        _lazy_loaded = True
+        if pipeline is None:
+            try:
+                import importlib.util
+                transformers_spec = importlib.util.find_spec("transformers")
+                if transformers_spec is None:
+                    raise ImportError("transformers not available")
+                
+                from transformers import pipeline as hf_pipeline
+                import torch as pytorch
+                pipeline = hf_pipeline
+                torch = pytorch
+                return pipeline
+            except (ImportError, Exception) as e:
+                print(f"⚠️ Failed to import transformers/torch: {str(e)[:50]}...")
+                pipeline = False
+                torch = False
+                return None
+    return pipeline if pipeline is not False else None
+
+def get_torch():
+    global torch
+    if torch is None:
+        get_pipeline()  # This will try to import both
+    if torch is False or torch is None:
+        return None
+    return torch
 
 import wikipediaapi
 import time
@@ -38,7 +70,7 @@ def query_wikidata(entity: str, limit: int = 3):
 
 def query_wikipedia(topic: str, sentences: int = 2):
     """Query Wikipedia for a detailed summary, sections, and links about a topic using wikipedia-api."""
-    wiki = wikipediaapi.Wikipedia('en')
+    wiki = wikipediaapi.Wikipedia(user_agent='AGI-Research-Agent/1.0 (https://github.com/MyndScript/AGI)', language='en')
     page = wiki.page(topic)
     if not page.exists():
         return {"error": f"No Wikipedia page found for '{topic}'"}
@@ -83,22 +115,55 @@ def query_openfda_drug_event(term: str, limit: int = 5, api_key: Optional[str] =
 
 
 class BaseAgent:
-    def _init_lightweight_models(self):
+    def _init_ai_services(self):
         """
-        Initialize lightweight transformer models for local inference.
-        Prioritize small, fast models for laptop use.
+        Initialize lightweight, local AI services that don't require API keys.
+        Prioritizes local models: Ollama, personality-enhanced, and lightweight transformers.
         """
-        self.available_models = ["distilgpt2", "flan-t5-small"]
+        # Available local AI services (no API keys required)
+        self.ai_services = {
+            "personality_enhanced": {
+                "base_url": "http://localhost:8002",
+                "models": ["personality-aware-response"],
+                "description": "Personality-aware responses via our personality server"
+            },
+            "ollama": {
+                "base_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
+                "models": ["llama3.2:1b", "phi3:mini", "qwen2.5:1.5b", "gemma2:2b"],
+                "description": "Local Ollama models (lightweight variants)"
+            }
+        }
+        
+        # Initialize available services (check if they're running)
+        self.active_services = []
+        
+        # Check personality server
+        try:
+            import requests
+            resp = requests.get("http://localhost:8002/health", timeout=0.5)
+            if resp.ok:
+                self.active_services.append("personality_enhanced")
+                print("✅ Personality-enhanced AI available")
+        except Exception:
+            print("⚠️ Personality server not running")
+        
+        # Check Ollama
+        try:
+            import requests
+            resp = requests.get("http://localhost:11434/api/version", timeout=0.5)
+            if resp.ok:
+                self.active_services.append("ollama")
+                print("✅ Ollama available")
+        except Exception:
+            print("⚠️ Ollama not running - install with: curl -fsSL https://ollama.ai/install.sh | sh")
+        
+        # Always initialize lightweight fallback models
+        self.fallback_models = ["distilgpt2", "flan-t5-small"]
         self.model_pipelines = {}
-        if pipeline is not None:
-            for m in self.available_models:
-                try:
-                    if m.startswith("flan-t5"):
-                        self.model_pipelines[m] = pipeline("text2text-generation", model=m)
-                    else:
-                        self.model_pipelines[m] = pipeline("text-generation", model=m)
-                except Exception:
-                    self.model_pipelines[m] = None
+        
+        print("� AI Services active:", self.active_services)
+        if not self.active_services:
+            print("⚠️ No AI services available - will use basic responses and load models on-demand")
     def fetch_external_facts(self, query):
         """Aggregate facts from Wikidata, Wikipedia, news, weather, books, movies, and openFDA if relevant."""
         facts = {
@@ -125,7 +190,7 @@ class BaseAgent:
         self.model_name = model_name
         self.use_http = use_http
         self.model_pipelines = {}
-        self._init_lightweight_models()
+        self._init_ai_services()
         # Production-ready memory and personality modules
     # Removed obsolete imports and local class instantiation
         self.memory = None  # Local memory API removed; use REST endpoints
@@ -228,14 +293,16 @@ class BaseAgent:
         return []
     def _get_context_embedding_similarity(self, query, context_keys, context):
         """Helper to compute embedding similarity for context keys."""
+        torch_module = get_torch()
+        if torch_module is None or torch_module is False:
+            return {key: 0.0 for key in context_keys}
         try:
             from transformers import AutoTokenizer, AutoModel
-            import torch
             tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
             model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
             def embed(text):
                 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
-                with torch.no_grad():
+                with torch_module.no_grad():  # type: ignore
                     outputs = model(**inputs)
                     emb = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
                 return emb
@@ -245,7 +312,7 @@ class BaseAgent:
                 value = context.get(key)
                 value_text = str(value)
                 ctx_emb = embed(value_text)
-                sim = float(torch.nn.functional.cosine_similarity(torch.tensor(query_emb), torch.tensor(ctx_emb), dim=0))
+                sim = float(torch_module.nn.functional.cosine_similarity(torch_module.tensor(query_emb), torch_module.tensor(ctx_emb), dim=0))  # type: ignore
                 sims[key] = sim
             return sims
         except Exception:
@@ -417,11 +484,11 @@ class BaseAgent:
         """Analyze emotional tone from facts using NLP models."""
         text_blobs = self._extract_text_blobs(facts)
         full_text = " ".join(text_blobs)
-        if pipeline is not None:
+        pipeline_fn = get_pipeline()
+        if pipeline_fn is not None:
             try:
-                from transformers.pipelines import pipeline as hf_pipeline  # type: ignore
-                sentiment_pipe = hf_pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")  # type: ignore
-                results = sentiment_pipe(full_text[:512])
+                sentiment_pipe = pipeline_fn("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")  # type: ignore
+                results = sentiment_pipe(full_text[:512])  # type: ignore
                 return self._map_sentiment_to_emotions(results)
             except Exception:
                 pass
@@ -459,10 +526,10 @@ class BaseAgent:
 
     def _summarize_text(self, full_text):
         """Helper to summarize text using transformers pipeline."""
-        if pipeline is not None:
+        pipeline_fn = get_pipeline()
+        if pipeline_fn is not None:
             try:
-                from transformers.pipelines import pipeline as hf_pipeline  # type: ignore
-                summarizer = hf_pipeline("summarization", model="facebook/bart-large-cnn")  # type: ignore
+                summarizer = pipeline_fn("summarization", model="facebook/bart-large-cnn")
                 summary = summarizer(full_text[:1024], max_length=80, min_length=20, do_sample=False)
                 return summary[0].get("summary_text", "")
             except Exception:
@@ -512,13 +579,17 @@ class BaseAgent:
 
     def aggregate_global_insight(self, insight, emotional_tag):
         """Aggregate de-identified user insight into global knowledge."""
-        # Differential privacy: anonymize and add noise to user insight before aggregation
-        import hashlib, random
+        # Differential privacy: anonymize and add deterministic noise to user insight before aggregation
+        import hashlib
+        import time as time_module
+        
         anonymized_id = hashlib.sha256(insight.encode()).hexdigest()[:16]
         noisy_tag = emotional_tag.copy() if isinstance(emotional_tag, dict) else emotional_tag
         if isinstance(noisy_tag, dict):
-            for k in noisy_tag:
-                noise = random.uniform(-0.05, 0.05)
+            for i, k in enumerate(noisy_tag):
+                # Use deterministic noise based on content and time for privacy
+                hash_seed = hash(f"{insight}_{k}_{int(time_module.time())//3600}")  # Changes hourly
+                noise = ((hash_seed % 1000) / 1000 - 0.5) * 0.1  # Range: -0.05 to +0.05
                 noisy_tag[k] = round(max(0.0, min(1.0, noisy_tag[k] + noise)), 2)
         self.global_knowledge.setdefault("user_insights", []).append({
             "anonymized_id": anonymized_id,
@@ -581,20 +652,26 @@ class BaseAgent:
         """Production-ready reply: surface top relevant memory and facts only."""
         memory = context.get("memory", [])
         facts = context.get("facts", {})
-        query = context.get("query", "")
+        
         # Prioritize relevant memory
         if memory:
-            return memory[0] if isinstance(memory, list) and memory[0] else ""  # Most relevant snippet
+            return memory[0] if isinstance(memory, list) and memory[0] else ""
+        
         # If no memory, use external facts
         if facts:
-            # Return concise fact summary
-            for v in facts.values():
-                if isinstance(v, str) and v:
-                    return v
-                if isinstance(v, list) and v and isinstance(v[0], str):
-                    return v[0]
+            return self._extract_fact_summary(facts)
+        
         # Fallback: direct answer or empty
         return "I'm here to help!"
+    
+    def _extract_fact_summary(self, facts):
+        """Helper to extract concise fact summary."""
+        for v in facts.values():
+            if isinstance(v, str) and v:
+                return v
+            if isinstance(v, list) and v and isinstance(v[0], str):
+                return v[0]
+        return ""
 
     def _weight_context(self, context):
         """
@@ -614,46 +691,69 @@ class BaseAgent:
         return weights
 
     def build_prompt(self, context):
+        """Build a prompt from context with weighted fusion."""
         weights = self._weight_context(context)
         # Simple weighted prompt fusion
-        prompt = (
-            f"Traits: {context['traits']} (w={weights['traits']})\n"
-            f"Mood: {context['mood']} (w={weights['mood']})\n"
-            f"Memory: {context['memory']} (w={weights['memory']})\n"
-            f"Facts: {context['facts']} (w={weights['facts']})\n"
-            f"User: {context['query']} (w={weights['query']})"
+        prompt = self._build_simple_prompt(context, weights)
+        
+        # Try embedding-based fusion for richer context
+        torch_module = get_torch()
+        if torch_module and torch_module is not False:
+            try:
+                fused_prompt = self._build_embedding_fused_prompt(context, torch_module)
+                return fused_prompt if fused_prompt else prompt
+            except Exception:
+                pass
+        return prompt
+    
+    def _build_simple_prompt(self, context, weights):
+        """Build simple weighted prompt."""
+        return (
+            f"Traits: {context.get('traits', {})} (w={weights.get('traits', 1.0)})\n"
+            f"Mood: {context.get('mood', {})} (w={weights.get('mood', 1.0)})\n"
+            f"Memory: {context.get('memory', [])} (w={weights.get('memory', 1.0)})\n"
+            f"Facts: {context.get('facts', {})} (w={weights.get('facts', 1.0)})\n"
+            f"User: {context.get('query', '')} (w={weights.get('query', 1.0)})"
         )
-        # Embedding-based fusion for richer context
-        try:
-            from transformers import AutoTokenizer, AutoModel
-            import torch
-            tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-            model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-            def embed(text):
-                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
-                with torch.no_grad():
-                    outputs = model(**inputs)
-                    emb = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
-                return emb
-            # Embed each context piece
-            context_texts = [str(context.get(k, "")) for k in ["traits", "mood", "memory", "facts", "query"]]
-            embeddings = [embed(txt) for txt in context_texts]
-            # Compute similarity matrix
-            fusion_weights = []
-            for i, emb_i in enumerate(embeddings):
-                sim_sum = 0.0
-                for j, emb_j in enumerate(embeddings):
-                    if i != j:
-                        sim = float(torch.nn.functional.cosine_similarity(torch.tensor(emb_i), torch.tensor(emb_j), dim=0))
-                        sim_sum += sim
-                fusion_weights.append(round(sim_sum / (len(embeddings)-1), 2) if len(embeddings) > 1 else 1.0)
-            # Build fused prompt
-            fused_prompt = ""
-            for k, txt, w in zip(["traits", "mood", "memory", "facts", "query"], context_texts, fusion_weights):
-                fused_prompt += f"{k.capitalize()}: {txt} (emb_w={w})\n"
-            return fused_prompt.strip()
-        except Exception:
-            return prompt
+    
+    def _build_embedding_fused_prompt(self, context, torch_module):
+        """Build embedding-based fused prompt."""
+        from transformers import AutoTokenizer, AutoModel
+        tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+        model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+        
+        def embed(text):
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
+            with torch_module.no_grad():  # type: ignore
+                outputs = model(**inputs)
+                emb = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+            return emb
+        
+        # Embed each context piece
+        context_keys = ["traits", "mood", "memory", "facts", "query"]
+        context_texts = [str(context.get(k, "")) for k in context_keys]
+        embeddings = [embed(txt) for txt in context_texts]
+        
+        # Compute similarity-based weights
+        fusion_weights = self._compute_fusion_weights(embeddings, torch_module)
+        
+        # Build fused prompt
+        fused_prompt = ""
+        for k, txt, w in zip(context_keys, context_texts, fusion_weights):
+            fused_prompt += f"{k.capitalize()}: {txt} (emb_w={w})\n"
+        return fused_prompt.strip()
+    
+    def _compute_fusion_weights(self, embeddings, torch_module):
+        """Compute fusion weights from embeddings."""
+        fusion_weights = []
+        for i, emb_i in enumerate(embeddings):
+            sim_sum = 0.0
+            for j, emb_j in enumerate(embeddings):
+                if i != j:
+                    sim = float(torch_module.nn.functional.cosine_similarity(torch_module.tensor(emb_i), torch_module.tensor(emb_j), dim=0))  # type: ignore
+                    sim_sum += sim
+            fusion_weights.append(round(sim_sum / (len(embeddings)-1), 2) if len(embeddings) > 1 else 1.0)
+        return fusion_weights
 
     def personalize_response(self, response, personality, style=None, sentiment=None):
         # Style
@@ -665,9 +765,31 @@ class BaseAgent:
             last_interaction = personality.interaction_history[-1]
             if last_interaction.get("tone", {}).get("mimicry"):
                 response = f"[Mimicry] {response}"
-        # Humor
-        if personality and personality.mood_vector.get("joy", 0) > 0.7:
-            response += " 😄 Here's a fun fact: Did you know honey never spoils?"
+        # Dynamic personality-based additions
+        if personality:
+            joy_level = personality.mood_vector.get("joy", 0)
+            curiosity_level = personality.mood_vector.get("curiosity", 0)
+            extraversion = personality.traits.get("extraversion", 0.5)
+            openness = personality.traits.get("openness", 0.5)
+            
+            # Joyful responses with contextual fun facts
+            if joy_level > 0.7:
+                # Generate contextual fun facts based on personality traits
+                if openness > 0.7:
+                    response += " 😄 Here's something fascinating: octopuses have three hearts and blue blood!"
+                elif extraversion > 0.7:
+                    response += " 😄 Fun fact: a group of flamingos is called a 'flamboyance' - quite social, like great conversations!"
+                else:
+                    response += " 😄 Did you know honey never spoils? Archaeologists have found 3000-year-old honey that's still edible!"
+            
+            # Curious responses
+            elif curiosity_level > 0.7:
+                response += " 🤔 That's fascinating! Tell me more about that."
+            
+            # Extraverted responses
+            elif extraversion > 0.7:
+                response += " 🌟 I love chatting about this!"
+        
         return response
     def push_topic(self, topic):
         """Push a topic onto the conversational stack."""
@@ -705,34 +827,62 @@ class BaseAgent:
             self.personality.update_traits({"last_feedback": feedback})
 
     def select_model(self, prompt, traits=None, mood=None):
-        """
-        Select model based on task, user preference, or detected mood using a decision table.
-        """
-        def prefers_reasoning(traits):
-            return traits and traits.get("prefers_reasoning")
-        def prefers_formal(traits):
-            return traits and traits.get("prefers_formal")
-        def is_creative(mood):
-            return mood and mood.get("creativity", 0) > 0.7
-        def is_joyful(mood):
-            return mood and mood.get("joy", 0) > 0.8
-        def is_news_topic(prompt):
-            return "news" in prompt.lower()
-        def is_story_topic(prompt):
-            return any(word in prompt.lower() for word in ["story", "creative"])
-
-        decision_table = [
-            (prefers_reasoning(traits), "flan-t5-base"),
-            (is_creative(mood), "gpt2"),
-            (is_news_topic(prompt), "flan-t5-base"),
-            (is_story_topic(prompt), "gpt2"),
-            (prefers_formal(traits), "flan-t5-base"),
-            (is_joyful(mood), "gpt2"),
-        ]
-        for condition, model in decision_table:
-            if condition and model in self.model_pipelines:
-                return model
-        return self.model_name
+        """Select the best local model based on task, user preference, and mood."""
+        # Check for personality-enhanced responses first
+        if "personality_enhanced" in self.active_services:
+            if self._should_use_personality_enhanced(prompt, traits, mood):
+                return ("personality_enhanced", "personality-aware-response")
+        
+        # Check for Ollama models
+        if "ollama" in self.active_services:
+            return self._select_ollama_model(prompt, traits, mood)
+        
+        # Fallback to lightweight transformers
+        return self._select_fallback_model(prompt)
+    
+    def _should_use_personality_enhanced(self, prompt, traits, mood):
+        """Check if personality-enhanced response is appropriate."""
+        casual_keywords = ["hello", "hi", "how are you", "what's up", "chat"]
+        return traits or mood or any(word in prompt.lower() for word in casual_keywords)
+    
+    def _select_ollama_model(self, prompt, traits, mood):
+        """Select appropriate Ollama model."""
+        if self._is_complex_topic(prompt) or self._prefers_reasoning(traits):
+            return ("ollama", "llama3.2:1b")
+        elif self._is_creative_topic(prompt) or self._prefers_creative(traits, mood):
+            return ("ollama", "phi3:mini")
+        else:
+            return ("ollama", "qwen2.5:1.5b")
+    
+    def _select_fallback_model(self, prompt):
+        """Select fallback transformer model."""
+        available_fallbacks = [m for m, p in self.model_pipelines.items() if p is not None]
+        if available_fallbacks:
+            if self._is_complex_topic(prompt):
+                return ("transformers", "flan-t5-small")
+            else:
+                return ("transformers", "distilgpt2")
+        return ("basic", "synthesized")
+    
+    def _prefers_reasoning(self, traits):
+        """Check if user prefers reasoning tasks."""
+        return traits and (traits.get("openness", 0) > 0.7 or traits.get("conscientiousness", 0) > 0.7)
+    
+    def _prefers_creative(self, traits, mood):
+        """Check if user prefers creative tasks."""
+        trait_creativity = traits and traits.get("openness", 0) > 0.7
+        mood_creativity = mood and mood.get("curiosity", 0) > 0.7
+        return trait_creativity or mood_creativity
+        
+    def _is_complex_topic(self, prompt):
+        """Check if prompt indicates complex reasoning task."""
+        complex_keywords = ["explain", "analyze", "compare", "reasoning", "logic", "philosophy", "science"]
+        return any(word in prompt.lower() for word in complex_keywords)
+        
+    def _is_creative_topic(self, prompt):
+        """Check if prompt indicates creative task."""
+        creative_keywords = ["story", "creative", "imagine", "dream", "art", "poem", "write"]
+        return any(word in prompt.lower() for word in creative_keywords)
 
     def _load_user_context(self, user_id):
         # Try to fetch global traits first
@@ -785,8 +935,7 @@ class BaseAgent:
             moments = moments if isinstance(moments, (list, tuple)) else []  # type: List[Dict]
             return [m['summary'] for m in moments if isinstance(m, dict) and 'summary' in m]
         except Exception as e:
-            import logging
-            logging.error(f"semantic_search_moments: error iterating moments: {e}")
+            print(f"⚠️ semantic_search_moments error: {e}")
             return []
         # Fallback: keyword match in posts/memory
         memory = self.memory.get_local(user_id)
@@ -859,27 +1008,129 @@ class BaseAgent:
         }
 
     def _generate_response(self, context, selected_model):
-        # Only use model if memory and facts are empty
+        """Generate response using selected model service."""
         memory = context.get("memory", [])
         facts = context.get("facts", {})
+        query = context.get("query", "")
+        
+        # If we have memory or facts, prioritize synthesis
         if memory or facts:
             return self.synthesize_reply(context)
-        pipeline_obj = self.model_pipelines.get(selected_model)
-        prompt = self.build_prompt(context)
+        
+        service_type, model_name = selected_model
         response = None
-        if pipeline_obj:
-            try:
-                if selected_model.startswith("flan-t5"):
-                    result = pipeline_obj(prompt, max_length=80)
-                    response = result[0]["generated_text"] if "generated_text" in result[0] else result[0]["generated_text"]
-                else:
-                    result = pipeline_obj(prompt, max_length=80, num_return_sequences=1)
-                    response = result[0]["generated_text"]
-            except Exception:
-                pass
+        
+        try:
+            if service_type == "personality_enhanced":
+                response = self._generate_personality_response(context, query, memory)
+            elif service_type == "ollama":
+                response = self._generate_ollama_response(context, model_name)
+            elif service_type == "transformers":
+                response = self._generate_transformers_response(context, model_name)
+        except Exception as e:
+            print(f"⚠️ Error with {service_type}/{model_name}: {str(e)[:100]}...")
+            response = None
+        
+        # Fallback to synthesis if model failed
+        if not response or len(response.strip()) < 10:
+            response = self.synthesize_reply(context)
+            
+        # Final fallback
         if not response:
-            response = "I'm here to help!"
-        return response
+            response = self._get_fallback_response()
+            
+        return response.strip()
+    
+    def _generate_personality_response(self, context, query, memory):
+        """Generate response using personality server."""
+        payload = {
+            "message": query,
+            "user_id": "default",
+            "context": {
+                "traits": context.get("traits", {}),
+                "mood": context.get("mood", {}),
+                "memory": memory[:3]
+            }
+        }
+        resp = requests.post("http://localhost:8002/personalized-response", 
+                           json=payload, timeout=10)
+        if resp.ok:
+            data = resp.json()
+            return data.get("response", "")
+        return None
+    
+    def _generate_ollama_response(self, context, model_name):
+        """Generate response using Ollama."""
+        payload = {
+            "model": model_name,
+            "prompt": self.build_prompt(context),
+            "stream": False,
+            "options": {
+                "temperature": 0.7,
+                "max_tokens": 150,
+                "top_p": 0.9
+            }
+        }
+        resp = requests.post("http://localhost:11434/api/generate", 
+                           json=payload, timeout=15)
+        if resp.ok:
+            data = resp.json()
+            return data.get("response", "").strip()
+        return None
+    
+    def _generate_transformers_response(self, context, model_name):
+        """Generate response using transformers pipeline."""
+        pipeline_obj = self.model_pipelines.get(model_name)
+        pipeline_fn = get_pipeline()
+        
+        if not pipeline_obj and pipeline_fn is not None:
+            pipeline_obj = self._load_transformer_model(model_name, pipeline_fn)
+            
+        if pipeline_obj:
+            return self._run_transformer_pipeline(pipeline_obj, context, model_name)
+        return None
+    
+    def _load_transformer_model(self, model_name, pipeline_fn):
+        """Load transformer model on-demand."""
+        try:
+            print(f"Loading {model_name} on-demand...")
+            if model_name.startswith("flan-t5"):
+                pipeline_obj = pipeline_fn("text2text-generation", model=model_name)  # type: ignore
+            else:
+                pipeline_obj = pipeline_fn("text-generation", model=model_name)  # type: ignore
+            self.model_pipelines[model_name] = pipeline_obj
+            print(f"✅ {model_name} loaded")
+            return pipeline_obj
+        except Exception as e:
+            print(f"❌ Failed to load {model_name}: {str(e)[:50]}...")
+            return None
+    
+    def _run_transformer_pipeline(self, pipeline_obj, context, model_name):
+        """Run the transformer pipeline to generate response."""
+        prompt = self.build_prompt(context)
+        if model_name.startswith("flan-t5"):
+            result = pipeline_obj(prompt, max_length=100, do_sample=True, temperature=0.7)  # type: ignore
+            return result[0]["generated_text"]  # type: ignore
+        else:
+            result = pipeline_obj(prompt, max_length=100, num_return_sequences=1,   # type: ignore
+                                do_sample=True, temperature=0.7, pad_token_id=50256)
+            return result[0]["generated_text"][len(prompt):].strip()  # type: ignore
+    
+    def _get_fallback_response(self):
+        """Get a contextual fallback response when all else fails."""
+        import time
+        
+        # Use time-based variation to avoid pure randomness
+        time_factor = int(time.time()) % 4
+        
+        fallback_responses = {
+            0: "I'm here to help! Could you tell me more about what you're looking for?",
+            1: "That's interesting! I'd love to hear more about your thoughts on this.", 
+            2: "I'm still learning about this topic. What aspects are most important to you?",
+            3: "Let me think about that... What specific information would be most helpful?"
+        }
+        
+        return fallback_responses[time_factor]
 
     def _post_process_response(self, response, style, sentiment):
         return self.personalize_response(response, self.personality, style=style, sentiment=sentiment)
